@@ -176,10 +176,73 @@ class SupplierColumnMapping(Base):
     supplier: Mapped[Supplier] = relationship()
 
 
+class ReconciliationRun(Base):
+    __tablename__ = "reconciliation_runs"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("suppliers.id", ondelete="CASCADE"), nullable=False
+    )
+    period: Mapped[str] = mapped_column(String, nullable=False)
+    # status: running | completed | failed
+    status: Mapped[str] = mapped_column(String, nullable=False, default="running")
+
+    total_erp: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_statement: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    matched_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    discrepancy_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    unmatched_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    auto_match_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    config: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    supplier: Mapped[Supplier] = relationship()
+    results: Mapped[list["ReconciliationResult"]] = relationship(back_populates="run")
+
+
+class ReconciliationConfig(Base):
+    __tablename__ = "reconciliation_config"
+    __table_args__ = (
+        UniqueConstraint("org_id", name="uq_reconciliation_config_org_id"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    qty_tolerance_pct: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, default=Decimal("0.50")
+    )
+    price_tolerance_pct: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2), nullable=False, default=Decimal("0.50")
+    )
+    auto_resolve_exact: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    ai_layer_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    ai_max_tokens_per_run: Mapped[int] = mapped_column(Integer, nullable=False, default=10000)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    organization: Mapped[Organization] = relationship()
+
+
 class ReconciliationResult(Base):
     __tablename__ = "reconciliation_results"
 
     id: Mapped[uuid.UUID] = _uuid_pk()
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("reconciliation_runs.id", ondelete="CASCADE"), nullable=True
+    )
     supplier_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("suppliers.id", ondelete="CASCADE"), nullable=False
     )
@@ -198,10 +261,22 @@ class ReconciliationResult(Base):
     match_type: Mapped[str] = mapped_column(String, nullable=False)
     quantity_delta: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
     price_delta: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    amount_delta: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    # discrepancy_type: quantity_over | quantity_under | price_higher | price_lower |
+    #                   missing_from_erp | missing_from_statement
+    discrepancy_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    confidence: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)
     # status: matched | discrepancy | resolved
     status: Mapped[str] = mapped_column(String, nullable=False)
     resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolved_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    match_details: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+    run: Mapped[ReconciliationRun | None] = relationship(back_populates="results")

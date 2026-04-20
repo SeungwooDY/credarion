@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Credarion — Data Ingestion Test</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f5f5; color: #1a1a1a; padding: 2rem; }
+    h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+    .subtitle { color: #666; font-size: 0.875rem; margin-bottom: 2rem; }
+    .container { max-width: 720px; margin: 0 auto; }
+    .card { background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 1.5rem; margin-bottom: 1.5rem; }
+    .card h2 { font-size: 1.1rem; margin-bottom: 0.25rem; }
+    .card .desc { font-size: 0.8rem; color: #888; margin-bottom: 1rem; }
+    label { display: block; font-size: 0.85rem; font-weight: 500; margin-bottom: 0.25rem; margin-top: 0.75rem; }
+    input[type="file"], input[type="text"], select {
+      width: 100%; padding: 0.5rem; border: 1px solid #ccc; border-radius: 4px;
+      font-size: 0.9rem; background: #fafafa;
+    }
+    select { appearance: auto; }
+    button {
+      margin-top: 1rem; padding: 0.6rem 1.5rem; background: #1a1a1a; color: #fff;
+      border: none; border-radius: 4px; cursor: pointer; font-size: 0.9rem;
+    }
+    button:hover { background: #333; }
+    button:disabled { background: #999; cursor: not-allowed; }
+    .result {
+      margin-top: 1rem; padding: 1rem; border-radius: 4px; font-size: 0.85rem;
+      font-family: 'SF Mono', Monaco, monospace; white-space: pre-wrap; display: none;
+    }
+    .result.success { background: #e8f5e9; border: 1px solid #a5d6a7; }
+    .result.error { background: #ffebee; border: 1px solid #ef9a9a; }
+    .result.info { background: #e3f2fd; border: 1px solid #90caf9; }
+    .step-num { display: inline-block; width: 1.5rem; height: 1.5rem; background: #1a1a1a; color: #fff; border-radius: 50%; text-align: center; line-height: 1.5rem; font-size: 0.75rem; margin-right: 0.5rem; }
+    .status-bar { display: flex; gap: 1rem; margin-bottom: 1.5rem; padding: 0.75rem 1rem; background: #fff; border: 1px solid #e0e0e0; border-radius: 8px; font-size: 0.85rem; }
+    .status-bar .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 0.35rem; }
+    .dot.green { background: #4caf50; }
+    .dot.red { background: #f44336; }
+    .dot.grey { background: #ccc; }
+    .loading { display: inline-block; width: 14px; height: 14px; border: 2px solid #ccc; border-top-color: #1a1a1a; border-radius: 50%; animation: spin 0.6s linear infinite; margin-right: 0.5rem; vertical-align: middle; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .progress-wrap { margin-top: 1rem; display: none; }
+    .progress-bar { width: 100%; height: 20px; background: #e0e0e0; border-radius: 10px; overflow: hidden; }
+    .progress-fill { height: 100%; background: #1a1a1a; border-radius: 10px; transition: width 0.3s ease; width: 0%; }
+    .progress-text { font-size: 0.8rem; color: #666; margin-top: 0.35rem; }
+    .stat-card { background: #f9f9f9; border: 1px solid #e0e0e0; border-radius: 6px; padding: 0.75rem 1rem; text-align: center; min-width: 100px; }
+    .stat-card .val { font-size: 1.4rem; font-weight: 700; }
+    .stat-card .label { font-size: 0.7rem; color: #888; margin-top: 0.15rem; }
+    .disc-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 0.5rem; }
+    .disc-table th, .disc-table td { padding: 0.4rem 0.6rem; border-bottom: 1px solid #eee; text-align: left; }
+    .disc-table th { background: #f5f5f5; font-weight: 600; }
+    .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 3px; font-size: 0.75rem; font-weight: 500; }
+    .badge.matched { background: #e8f5e9; color: #2e7d32; }
+    .badge.discrepancy { background: #fff3e0; color: #e65100; }
+    .badge.unmatched { background: #ffebee; color: #c62828; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Credarion — Data Ingestion</h1>
+    <p class="subtitle">Upload ERP exports and supplier statements to test the ingestion pipeline</p>
+
+    <div class="status-bar" id="statusBar">
+      <span><span class="dot grey" id="dotApi"></span> API</span>
+      <span><span class="dot grey" id="dotDb"></span> Database</span>
+      <span><span class="dot grey" id="dotOrg"></span> Organization</span>
+    </div>
+
+    <!-- Step 1: Organization Setup -->
+    <div class="card">
+      <h2><span class="step-num">1</span>Organization</h2>
+      <p class="desc">Create the pilot org or select an existing one. Required before uploading.</p>
+
+      <div id="orgSection">
+        <label>Existing organizations</label>
+        <select id="orgSelect">
+          <option value="">Loading...</option>
+        </select>
+
+        <div style="margin-top: 1rem; padding-top: 0.75rem; border-top: 1px solid #eee;">
+          <label>Or create new</label>
+          <input type="text" id="orgName" placeholder="e.g. 梅州国威电子有限公司" value="梅州国威电子有限公司">
+          <button onclick="createOrg()" id="btnCreateOrg">Create Organization</button>
+        </div>
+      </div>
+      <div class="result" id="orgResult"></div>
+    </div>
+
+    <!-- Step 2: GRN Upload -->
+    <div class="card">
+      <h2><span class="step-num">2</span>ERP / GRN Upload</h2>
+      <p class="desc">Upload the SGWERP Goods Receipt export (CSV/XLSX). This auto-creates suppliers from the file.</p>
+
+      <label>GRN file</label>
+      <input type="file" id="grnFile" accept=".csv,.xlsx,.xls">
+
+      <button onclick="uploadGRN()" id="btnGRN" disabled>Upload GRN</button>
+      <div class="progress-wrap" id="grnProgress">
+        <div class="progress-bar"><div class="progress-fill" id="grnProgressFill"></div></div>
+        <div class="progress-text" id="grnProgressText">Preparing...</div>
+      </div>
+      <div class="result" id="grnResult"></div>
+    </div>
+
+    <!-- Step 3: Supplier Statement Upload -->
+    <div class="card">
+      <h2><span class="step-num">3</span>Supplier Statement Upload</h2>
+      <p class="desc">Upload a supplier reconciliation statement (e.g. 奥雄). Requires a supplier to exist first (created by GRN upload).</p>
+
+      <label>Supplier</label>
+      <select id="supplierSelect" disabled>
+        <option value="">Loading suppliers...</option>
+      </select>
+
+      <label>Period</label>
+      <input type="text" id="period" placeholder="e.g. 2026-03" value="2026-03">
+
+      <label>Statement file</label>
+      <input type="file" id="stmtFile" accept=".csv,.xlsx,.xls">
+
+      <button onclick="uploadStatement()" id="btnStmt" disabled>Upload Statement</button>
+      <div class="result" id="stmtResult"></div>
+    </div>
+
+    <!-- Step 4: Run Reconciliation -->
+    <div class="card">
+      <h2><span class="step-num">4</span>Run Reconciliation</h2>
+      <p class="desc">Match ERP records against the uploaded supplier statement. Runs the 4-layer matching engine (exact → fuzzy → delivery note → AI).</p>
+
+      <label>Supplier</label>
+      <select id="reconSupplierSelect" disabled>
+        <option value="">Upload data first</option>
+      </select>
+
+      <label>Period</label>
+      <input type="text" id="reconPeriod" placeholder="e.g. 2026-03" value="2026-03">
+
+      <button onclick="runReconciliation()" id="btnRecon" disabled>Run Reconciliation</button>
+      <div class="progress-wrap" id="reconProgress">
+        <div class="progress-bar"><div class="progress-fill" id="reconProgressFill"></div></div>
+        <div class="progress-text" id="reconProgressText"></div>
+      </div>
+      <div class="result" id="reconResult"></div>
+
+      <div id="reconDetails" style="display:none; margin-top:1rem;">
+        <h3 style="font-size:0.95rem; margin-bottom:0.5rem;">Results</h3>
+        <div style="display:flex; gap:0.75rem; flex-wrap:wrap; margin-bottom:0.75rem;" id="reconStats"></div>
+        <div id="reconDiscrepancies"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API = '';  // same origin
+
+    // --- Status checks ---
+    async function checkStatus() {
+      try {
+        const r = await fetch(`${API}/health`);
+        if (r.ok) {
+          setDot('dotApi', 'green');
+          setDot('dotDb', 'green');  // health implies DB is reachable
+        }
+      } catch {
+        setDot('dotApi', 'red');
+        setDot('dotDb', 'red');
+      }
+      await loadOrgs();
+    }
+
+    function setDot(id, color) {
+      const el = document.getElementById(id);
+      el.className = `dot ${color}`;
+    }
+
+    function showResult(id, text, type) {
+      const el = document.getElementById(id);
+      el.textContent = text;
+      el.className = `result ${type}`;
+      el.style.display = 'block';
+    }
+
+    // --- Organizations ---
+    async function loadOrgs() {
+      try {
+        const r = await fetch(`${API}/api/v1/orgs`);
+        const orgs = await r.json();
+        const sel = document.getElementById('orgSelect');
+        sel.innerHTML = '<option value="">-- Select --</option>';
+        orgs.forEach(o => {
+          const opt = document.createElement('option');
+          opt.value = o.id;
+          opt.textContent = `${o.name} (${o.id.slice(0, 8)}...)`;
+          sel.appendChild(opt);
+        });
+        if (orgs.length > 0) {
+          sel.value = orgs[0].id;
+          setDot('dotOrg', 'green');
+          enableUploads();
+          await loadSuppliers(orgs[0].id);
+        }
+      } catch {
+        document.getElementById('orgSelect').innerHTML = '<option value="">Failed to load</option>';
+      }
+    }
+
+    async function createOrg() {
+      const name = document.getElementById('orgName').value.trim();
+      if (!name) return;
+
+      const btn = document.getElementById('btnCreateOrg');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="loading"></span>Creating...';
+
+      try {
+        const r = await fetch(`${API}/api/v1/orgs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+        const data = await r.json();
+        if (r.ok) {
+          showResult('orgResult', `Created: ${data.name}\nID: ${data.id}`, 'success');
+          setDot('dotOrg', 'green');
+          await loadOrgs();
+          document.getElementById('orgSelect').value = data.id;
+          enableUploads();
+        } else {
+          showResult('orgResult', JSON.stringify(data, null, 2), 'error');
+        }
+      } catch (e) {
+        showResult('orgResult', `Error: ${e.message}`, 'error');
+      }
+      btn.disabled = false;
+      btn.textContent = 'Create Organization';
+    }
+
+    function getOrgId() {
+      return document.getElementById('orgSelect').value;
+    }
+
+    function enableUploads() {
+      document.getElementById('btnGRN').disabled = !getOrgId();
+    }
+
+    document.getElementById('orgSelect').addEventListener('change', async () => {
+      enableUploads();
+      const orgId = getOrgId();
+      if (orgId) {
+        await loadSuppliers(orgId);
+      } else {
+        const sel = document.getElementById('supplierSelect');
+        sel.innerHTML = '<option value="">Select an organization first</option>';
+        sel.disabled = true;
+        document.getElementById('btnStmt').disabled = true;
+      }
+    });
+
+    // --- GRN Upload ---
+    function setProgress(pct, message) {
+      const wrap = document.getElementById('grnProgress');
+      const fill = document.getElementById('grnProgressFill');
+      const text = document.getElementById('grnProgressText');
+      wrap.style.display = 'block';
+      fill.style.width = Math.min(100, Math.max(0, pct)) + '%';
+      text.textContent = message || '';
+    }
+
+    async function uploadGRN() {
+      const orgId = getOrgId();
+      const file = document.getElementById('grnFile').files[0];
+      if (!orgId || !file) {
+        showResult('grnResult', 'Select an organization and a file first.', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('btnGRN');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="loading"></span>Uploading...';
+      document.getElementById('grnResult').style.display = 'none';
+      setProgress(2, 'Uploading file to server...');
+
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('org_id', orgId);
+
+      try {
+        const r = await fetch(`${API}/api/v1/erp/upload-stream`, { method: 'POST', body: fd });
+
+        if (!r.ok) {
+          const errData = await r.json();
+          setProgress(0, '');
+          document.getElementById('grnProgress').style.display = 'none';
+          showResult('grnResult', JSON.stringify(errData.detail || errData, null, 2), 'error');
+          btn.disabled = false;
+          btn.textContent = 'Upload GRN';
+          return;
+        }
+
+        const reader = r.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let finalResult = null;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop();
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed.startsWith('data: ')) continue;
+            const data = JSON.parse(trimmed.slice(6));
+
+            if (data.type === 'progress') {
+              let pct = 5;
+              if (data.phase === 'reading') pct = 10;
+              else if (data.phase === 'suppliers') pct = 20;
+              else if (data.phase === 'ingesting' && data.total > 0) pct = 20 + Math.round((data.current / data.total) * 65);
+              else if (data.phase === 'saving') pct = 88;
+              else if (data.phase === 'done') pct = 100;
+              setProgress(pct, data.message);
+            } else if (data.type === 'result') {
+              finalResult = data;
+            }
+          }
+        }
+
+        if (finalResult && finalResult.status === 'success') {
+          setProgress(100, 'Done!');
+          let msg = `Status: ${finalResult.status}\n` +
+            `Rows ingested: ${finalResult.rows_ingested}\n` +
+            `Rows skipped: ${finalResult.rows_skipped}`;
+          if (finalResult.rows_duplicate > 0) {
+            msg += `\nDuplicates skipped: ${finalResult.rows_duplicate}`;
+          }
+          msg += `\nSuppliers created: ${finalResult.suppliers_created}`;
+          showResult('grnResult', msg, 'success');
+          await loadSuppliers(orgId);
+        } else if (finalResult) {
+          setProgress(0, '');
+          document.getElementById('grnProgress').style.display = 'none';
+          showResult('grnResult', JSON.stringify(finalResult, null, 2), 'error');
+        }
+      } catch (e) {
+        document.getElementById('grnProgress').style.display = 'none';
+        showResult('grnResult', `Error: ${e.message}`, 'error');
+      }
+      btn.disabled = false;
+      btn.textContent = 'Upload GRN';
+    }
+
+    // --- Suppliers ---
+    async function loadSuppliers(orgId) {
+      try {
+        const r = await fetch(`${API}/api/v1/orgs/${orgId}/suppliers`);
+        const suppliers = await r.json();
+        const selIds = ['supplierSelect', 'reconSupplierSelect'];
+        if (suppliers.length === 0) {
+          selIds.forEach(id => {
+            const sel = document.getElementById(id);
+            sel.innerHTML = '<option value="">No suppliers yet — upload a GRN file first</option>';
+            sel.disabled = true;
+          });
+          document.getElementById('btnStmt').disabled = true;
+          document.getElementById('btnRecon').disabled = true;
+          return;
+        }
+        selIds.forEach(id => {
+          const sel = document.getElementById(id);
+          sel.innerHTML = '<option value="">-- Select supplier --</option>';
+          suppliers.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s.id;
+            opt.textContent = `${s.name} (${s.vendor_code})`;
+            sel.appendChild(opt);
+          });
+          sel.disabled = false;
+        });
+        document.getElementById('btnStmt').disabled = false;
+        document.getElementById('btnRecon').disabled = false;
+      } catch {
+        console.error('Failed to load suppliers');
+      }
+    }
+
+    // --- Statement Upload ---
+    async function uploadStatement() {
+      const supplierId = document.getElementById('supplierSelect').value;
+      const period = document.getElementById('period').value.trim();
+      const file = document.getElementById('stmtFile').files[0];
+
+      if (!supplierId || !period || !file) {
+        showResult('stmtResult', 'Select a supplier, enter a period, and choose a file.', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('btnStmt');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="loading"></span>Uploading...';
+
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('supplier_id', supplierId);
+      fd.append('period', period);
+
+      try {
+        const r = await fetch(`${API}/api/v1/statements/upload`, { method: 'POST', body: fd });
+        const data = await r.json();
+        if (r.ok) {
+          showResult('stmtResult',
+            `Status: ${data.status}\n` +
+            `Statement ID: ${data.statement_id}\n` +
+            `Rows ingested: ${data.rows_ingested}\n` +
+            `Rows skipped: ${data.rows_skipped}\n` +
+            `Mapping source: ${data.mapping_source}`,
+            'success'
+          );
+        } else {
+          const detail = data.detail || data;
+          showResult('stmtResult', JSON.stringify(detail, null, 2), 'error');
+        }
+      } catch (e) {
+        showResult('stmtResult', `Error: ${e.message}`, 'error');
+      }
+      btn.disabled = false;
+      btn.textContent = 'Upload Statement';
+    }
+
+    // --- Reconciliation ---
+    async function runReconciliation() {
+      const supplierId = document.getElementById('reconSupplierSelect').value;
+      const period = document.getElementById('reconPeriod').value.trim();
+      if (!supplierId || !period) {
+        showResult('reconResult', 'Select a supplier and enter a period.', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('btnRecon');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="loading"></span>Running...';
+      document.getElementById('reconResult').style.display = 'none';
+      document.getElementById('reconDetails').style.display = 'none';
+
+      const prog = document.getElementById('reconProgress');
+      const fill = document.getElementById('reconProgressFill');
+      const text = document.getElementById('reconProgressText');
+      prog.style.display = 'block';
+      fill.style.width = '30%';
+      text.textContent = 'Running 4-layer matching engine...';
+
+      try {
+        const r = await fetch(`${API}/api/v1/reconciliation/run`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ supplier_id: supplierId, period }),
+        });
+        const data = await r.json();
+
+        if (r.ok) {
+          fill.style.width = '100%';
+          text.textContent = 'Done!';
+          const run = data.run;
+          showResult('reconResult',
+            `Status: ${run.status}\n` +
+            `ERP records: ${run.total_erp}\n` +
+            `Statement lines: ${run.total_statement}\n` +
+            `Matched: ${run.matched_count}\n` +
+            `Discrepancies: ${run.discrepancy_count}\n` +
+            `Unmatched: ${run.unmatched_count}\n` +
+            `Auto-match rate: ${run.auto_match_rate != null ? run.auto_match_rate + '%' : 'N/A'}`,
+            'success'
+          );
+          showReconDetails(run);
+        } else {
+          fill.style.width = '0%';
+          prog.style.display = 'none';
+          const detail = data.detail || data;
+          showResult('reconResult', typeof detail === 'string' ? detail : JSON.stringify(detail, null, 2), 'error');
+        }
+      } catch (e) {
+        prog.style.display = 'none';
+        showResult('reconResult', `Error: ${e.message}`, 'error');
+      }
+      btn.disabled = false;
+      btn.textContent = 'Run Reconciliation';
+    }
+
+    async function showReconDetails(run) {
+      const details = document.getElementById('reconDetails');
+      const stats = document.getElementById('reconStats');
+      const disc = document.getElementById('reconDiscrepancies');
+
+      const rate = run.auto_match_rate != null ? run.auto_match_rate + '%' : '-';
+      stats.innerHTML = `
+        <div class="stat-card"><div class="val">${run.total_erp}</div><div class="label">ERP Records</div></div>
+        <div class="stat-card"><div class="val">${run.total_statement}</div><div class="label">Statement Lines</div></div>
+        <div class="stat-card"><div class="val" style="color:#2e7d32">${run.matched_count}</div><div class="label">Matched</div></div>
+        <div class="stat-card"><div class="val" style="color:#e65100">${run.discrepancy_count}</div><div class="label">Discrepancies</div></div>
+        <div class="stat-card"><div class="val" style="color:#c62828">${run.unmatched_count}</div><div class="label">Unmatched</div></div>
+        <div class="stat-card"><div class="val">${rate}</div><div class="label">Match Rate</div></div>
+      `;
+
+      // Load discrepancy details
+      try {
+        const r = await fetch(`${API}/api/v1/reconciliation/results?run_id=${run.id}&limit=50`);
+        const results = await r.json();
+        if (results.length === 0) {
+          disc.innerHTML = '<p style="font-size:0.85rem;color:#888;">No results to display.</p>';
+        } else {
+          let html = '<table class="disc-table"><thead><tr><th>Type</th><th>Match</th><th>Status</th><th>Qty Delta</th><th>Price Delta</th><th>Discrepancy</th></tr></thead><tbody>';
+          results.forEach(r => {
+            const badge = `<span class="badge ${r.status}">${r.status}</span>`;
+            html += `<tr>
+              <td>${r.match_type}</td>
+              <td>${badge}</td>
+              <td>${r.discrepancy_type || '-'}</td>
+              <td>${r.quantity_delta != null ? r.quantity_delta.toFixed(2) : '-'}</td>
+              <td>${r.price_delta != null ? r.price_delta.toFixed(4) : '-'}</td>
+              <td>${r.discrepancy_type || '-'}</td>
+            </tr>`;
+          });
+          html += '</tbody></table>';
+          disc.innerHTML = html;
+        }
+      } catch {
+        disc.innerHTML = '<p style="font-size:0.85rem;color:#c62828;">Failed to load results.</p>';
+      }
+
+      details.style.display = 'block';
+    }
+
+    // Init
+    checkStatus();
+  </script>
+</body>
+</html>
