@@ -280,3 +280,76 @@ class ReconciliationResult(Base):
     )
 
     run: Mapped[ReconciliationRun | None] = relationship(back_populates="results")
+
+
+class Invoice(Base):
+    __tablename__ = "invoices"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    supplier_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True
+    )
+
+    invoice_number: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    invoice_date: Mapped[date | None] = mapped_column(nullable=True)
+    due_date: Mapped[date | None] = mapped_column(nullable=True)
+
+    subtotal: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    vat_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)
+    vat_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    total_amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False, default="RMB")
+
+    # status: received → extracted → matched → approved → paid
+    status: Mapped[str] = mapped_column(String, nullable=False, default="received", index=True)
+
+    file_url: Mapped[str] = mapped_column(String, nullable=False)
+    file_type: Mapped[str] = mapped_column(String(10), nullable=False)
+    original_filename: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    raw_extraction: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    extraction_confidence: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)
+    field_confidences: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    needs_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+    supplier_name_extracted: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    extracted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    organization: Mapped[Organization] = relationship()
+    supplier: Mapped[Supplier | None] = relationship()
+    line_items: Mapped[list["InvoiceLineItem"]] = relationship(
+        back_populates="invoice", cascade="all, delete-orphan"
+    )
+
+
+class InvoiceLineItem(Base):
+    __tablename__ = "invoice_line_items"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    invoice_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False
+    )
+
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
+    unit_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
+    amount: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+
+    po_number: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    material_number: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+
+    raw_fields: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+    invoice: Mapped[Invoice] = relationship(back_populates="line_items")

@@ -3,7 +3,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
-from app.routers import erp, orgs, reconciliation, statements
+from app.routers import erp, invoices, orgs, reconciliation, statements
 
 app = FastAPI(title="Credarion API", version="0.1.0")
 
@@ -11,6 +11,7 @@ app.include_router(statements.router)
 app.include_router(erp.router)
 app.include_router(orgs.router)
 app.include_router(reconciliation.router)
+app.include_router(invoices.router)
 
 
 @app.get("/health")
