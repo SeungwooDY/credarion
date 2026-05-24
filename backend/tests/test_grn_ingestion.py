@@ -546,7 +546,7 @@ class TestRealGRNFile:
         """Full end-to-end ingestion of the real GRN file."""
         result = ingest_grn(str(GRN_FILE), org.id, db_session)
         assert result.status == "success"
-        assert result.rows_ingested > 6000
+        assert result.rows_ingested > 5000  # ~1441 rows skipped (null po_price)
         # Should have created ~214 suppliers
         suppliers = db_session.query(Supplier).filter_by(org_id=org.id).count()
         assert suppliers > 100

@@ -1,9 +1,14 @@
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 
 from app.routers import erp, invoices, orgs, reconciliation, statements
+
+# Configure logging so reconciliation debug output is visible
+logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
+logging.getLogger("app.reconciliation").setLevel(logging.DEBUG)
 
 app = FastAPI(title="Credarion API", version="0.1.0")
 

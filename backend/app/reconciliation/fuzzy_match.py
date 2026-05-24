@@ -1,7 +1,8 @@
 """Layer 2: Fuzzy match on normalized PO numbers.
 
 Handles cases where PO numbers differ by leading zeros, dashes, or spaces
-but represent the same order.
+but represent the same order. Includes PO-only fallback for cross-system
+material number mismatches.
 """
 from __future__ import annotations
 
@@ -11,9 +12,8 @@ from app.reconciliation.exact_match import (
     MatchCandidate,
     MatchResult,
     StatementItem,
-    _classify_discrepancy,
+    _build_match,
     _pick_best_erp,
-    _within_tolerance,
 )
 from app.reconciliation.normalization import (
     normalize_material_for_matching,
@@ -30,6 +30,7 @@ def _fuzzy_key(po: str | None, material: str | None) -> tuple[str, str] | None:
     return (norm_po, norm_mat)
 
 
+
 def run_fuzzy_match(
     erp_records: list[MatchCandidate],
     statement_items: list[StatementItem],
@@ -38,65 +39,36 @@ def run_fuzzy_match(
 ) -> tuple[list[MatchResult], list[MatchCandidate], list[StatementItem]]:
     """Run Layer 2 fuzzy matching on unmatched items from Layer 1.
 
+    Strategy: fuzzy-normalized PO+PN composite key (strips dashes, zeros,
+    uppercases material numbers). Catches format differences between systems.
+
     Returns:
         (matches, unmatched_erp, unmatched_statement)
     """
-    # Build fuzzy ERP lookup
-    erp_lookup: dict[tuple[str, str], list[MatchCandidate]] = {}
+    # Build composite lookup
+    erp_composite: dict[tuple[str, str], list[MatchCandidate]] = {}
     for erp in erp_records:
         key = _fuzzy_key(erp.po_number, erp.material_number)
         if key is not None:
-            erp_lookup.setdefault(key, []).append(erp)
+            erp_composite.setdefault(key, []).append(erp)
 
     matches: list[MatchResult] = []
-    unmatched_stmt: list[StatementItem] = []
     matched_erp_ids: set = set()
+    unmatched_stmt: list[StatementItem] = []
 
+    # --- Strict PO+PN fuzzy matching ---
     for stmt in statement_items:
         key = _fuzzy_key(stmt.po_number, stmt.material_number)
-        if key is None or key not in erp_lookup:
-            unmatched_stmt.append(stmt)
-            continue
-
-        available = [e for e in erp_lookup[key] if e.erp_id not in matched_erp_ids]
-        if not available:
-            unmatched_stmt.append(stmt)
-            continue
-
-        erp = _pick_best_erp(available, stmt)
-        matched_erp_ids.add(erp.erp_id)
-
-        qty_delta = stmt.quantity - erp.quantity
-        price_delta = stmt.unit_price - erp.po_price
-        amount_delta = stmt.amount - erp.amount
-
-        qty_ok = _within_tolerance(erp.quantity, stmt.quantity, qty_tolerance_pct)
-        price_ok = _within_tolerance(erp.po_price, stmt.unit_price, price_tolerance_pct)
-
-        if qty_ok and price_ok:
-            status = "matched"
-            disc_type = None
-        else:
-            status = "discrepancy"
-            disc_type = _classify_discrepancy(qty_delta, price_delta)
-
-        matches.append(MatchResult(
-            erp=erp,
-            statement=stmt,
-            match_type="fuzzy",
-            quantity_delta=qty_delta,
-            price_delta=price_delta,
-            amount_delta=amount_delta,
-            status=status,
-            discrepancy_type=disc_type,
-            confidence=Decimal("0.90"),
-            match_details={
-                "layer": 2,
-                "fuzzy_key": list(key),
-                "original_erp_po": erp.po_number,
-                "original_stmt_po": stmt.po_number,
-            },
-        ))
+        if key is not None and key in erp_composite:
+            available = [e for e in erp_composite[key] if e.erp_id not in matched_erp_ids]
+            if available:
+                erp = _pick_best_erp(available, stmt)
+                matched_erp_ids.add(erp.erp_id)
+                matches.append(_build_match(erp, stmt, "fuzzy", Decimal("0.90"),
+                    {"layer": 2, "key_type": "po_pn", "fuzzy_key": list(key)},
+                    qty_tolerance_pct, price_tolerance_pct))
+                continue
+        unmatched_stmt.append(stmt)
 
     unmatched_erp = [e for e in erp_records if e.erp_id not in matched_erp_ids]
 

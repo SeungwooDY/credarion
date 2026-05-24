@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from typing import Any
 
@@ -39,12 +40,13 @@ ALIAS_MAP: dict[str, list[str]] = {
         "订单号",
     ],
     "material_number": [
-        "规格型号1",
-        "规格型号",
-        "对应代码",
         "物料编码",
-        "产品型号",
         "客户料号",
+        "对应代码",
+        "产品名称",
+        "产品型号",
+        "规格型号",
+        "规格型号1",
     ],
     "quantity": [
         "实发数量",
@@ -98,22 +100,88 @@ def _normalize_header(h: str) -> str:
     return s
 
 
-def try_alias_mapping(headers: list[str]) -> dict[str, str] | None:
+# Guowei part number pattern: NNN*NNN+ (e.g. 126*1715*9*006, 590*5121*9*001)
+_GUOWEI_PN_PATTERN = re.compile(r"\d{3}\*\d{3,}")
+
+
+def _score_material_column(
+    header: str, col_idx: int, sample_rows: list[list[str]] | None,
+) -> float:
+    """Score how likely a column contains Guowei part numbers (0.0–1.0).
+
+    Checks sample data values against the known part number pattern.
+    Returns 0.5 if no sample data is available (neutral score).
+    """
+    if not sample_rows:
+        return 0.5
+    hits = 0
+    total = 0
+    for row in sample_rows:
+        if col_idx >= len(row):
+            continue
+        val = row[col_idx].strip()
+        if not val:
+            continue
+        total += 1
+        if _GUOWEI_PN_PATTERN.search(val):
+            hits += 1
+    return hits / total if total > 0 else 0.5
+
+
+def try_alias_mapping(
+    headers: list[str], sample_rows: list[list[str]] | None = None,
+) -> dict[str, str] | None:
     """Tier 1: Try to map headers using the alias dictionary.
+
+    When multiple columns match material_number aliases, validates against
+    sample data to pick the column that contains actual part numbers
+    (NNN*NNNN*N*NNN pattern) rather than supplier-internal codes.
 
     Returns:
         Dict mapping canonical field name → original column header,
         or None if required fields can't be mapped.
     """
     mapping: dict[str, str] = {}
-    for header in headers:
+    # Track all material_number candidates with their column indices
+    material_candidates: list[tuple[str, int]] = []
+
+    for idx, header in enumerate(headers):
         if not header:
             continue
         normalized = _normalize_header(header)
         if normalized in _REVERSE_ALIAS:
             canonical = _REVERSE_ALIAS[normalized]
-            if canonical not in mapping:  # first match wins
+            if canonical == "material_number":
+                material_candidates.append((header, idx))
+            elif canonical not in mapping:
                 mapping[canonical] = header
+
+    # Also check for unmapped columns whose data matches the part number pattern
+    if sample_rows:
+        mapped_headers = set(mapping.values())
+        for idx, header in enumerate(headers):
+            if not header or header in mapped_headers:
+                continue
+            if header in [h for h, _ in material_candidates]:
+                continue
+            score = _score_material_column(header, idx, sample_rows)
+            if score >= 0.5:
+                material_candidates.append((header, idx))
+
+    # Pick the best material_number column by data validation
+    if material_candidates:
+        if len(material_candidates) == 1 and not sample_rows:
+            mapping["material_number"] = material_candidates[0][0]
+        else:
+            best_header = None
+            best_score = -1.0
+            for header, idx in material_candidates:
+                score = _score_material_column(header, idx, sample_rows)
+                if score > best_score:
+                    best_score = score
+                    best_header = header
+            if best_header is not None:
+                mapping["material_number"] = best_header
 
     if REQUIRED_FIELDS.issubset(mapping.keys()):
         return mapping
@@ -258,8 +326,8 @@ async def resolve_column_mapping(
     Returns:
         (column_map, source, needs_review)
     """
-    # Tier 1 — alias dict
-    alias_result = try_alias_mapping(headers)
+    # Tier 1 — alias dict (with sample data for material number validation)
+    alias_result = try_alias_mapping(headers, sample_rows)
     if alias_result:
         upsert_mapping(supplier_id, alias_result, "alias", header_row, db, confidence=1.0)
         return alias_result, "alias", False

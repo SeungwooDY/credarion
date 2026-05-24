@@ -33,7 +33,7 @@ def filter_summary_rows(df: pd.DataFrame) -> pd.DataFrame:
 
 def normalize_po_number(val: object) -> str | None:
     """Normalize PO numbers: '428759.0' → '428759', strip whitespace."""
-    if pd.isna(val) or str(val).strip() == "":
+    if pd.isna(val) or str(val).strip() == "" or str(val).strip().lower() == "nan":
         return None
     s = str(val).strip()
     # Float-like PO numbers from Excel: "428759.0" → "428759"
@@ -103,14 +103,14 @@ def clean_dataframe(
     """
     original_columns = list(df.columns)
 
-    # 1. Build raw_row before any transformations
+    # 1. Filter summary rows first (before _raw_row, so dict keys don't trigger false matches)
+    df = filter_summary_rows(df)
+
+    # 2. Build raw_row before renaming/normalization
     df["_raw_row"] = df.apply(lambda row: build_raw_row(row, original_columns), axis=1)
 
-    # 2. Rename columns using the mapping
+    # 3. Rename columns using the mapping
     df = rename_columns(df, column_map)
-
-    # 3. Filter summary rows (before normalization so keywords are still visible)
-    df = filter_summary_rows(df)
 
     # 4. Normalize PO numbers
     if "po_number" in df.columns:

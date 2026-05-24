@@ -1,63 +1,100 @@
 @AGENTS.md
 
-Credarion — Project Summary
-What It Is
+# Credarion — Project Summary
+
+## What It Is
 An AI-powered accounting co-pilot built specifically for Asia-Pacific mid-market companies. Not a dashboard, not analytics — it actually does the accounting work: reconciliation, categorization, invoice processing, accruals, consolidation, forecasting, and month-end close.
 
-The Problem It Solves
-The pilot company — 梅州国威电子有限公司 (Méizhōu Guówēi Diànzǐ Yǒuxiàn Gōngsī) — is a manufacturing business that makes the problem visceral and real:
+## Pilot Company
+梅州国威电子有限公司 (Méizhōu Guówēi Diànzǐ Yǒuxiàn Gōngsī) — a manufacturing business:
+- 300 suppliers, 1,000+ delivery notes/month, 240–280 invoices/month
+- Supplier reconciliation takes 7 days/month in Excel
+- ERP: SGWERP (supply chain) + Kingdee K/3 (finance)
+- Target: reduce reconciliation from 7 days to 1–2 days
 
-300 suppliers, 1,000+ delivery notes/month, 240–280 invoices/month — all manually processed
-Supplier reconciliation takes 7 days per month in Excel, comparing ERP data against supplier-provided statements line by line
-The bottleneck: ERP uses one system (SGWERP for supply chain, Kingdee K/3 for finance), suppliers each send statements in their own format — someone has to bridge that gap manually every month
-Cross-border payments at ~17%, all requiring manual paperwork
-Two roles doing this: an AP accountant and a cashier (出纳, Chūnà)
+## Architecture
 
-The CFO confirmed the pain hierarchy: monthly consolidation, cash visibility, rolling forecasts, and reconciliation are the biggest time sinks.
+### Backend (`backend/`)
+- **Framework**: FastAPI + SQLAlchemy 2.0 + Alembic
+- **Database**: PostgreSQL (Supabase), SQLite for tests
+- **AI**: Anthropic Claude API (Haiku for OCR + AI matching)
+- **Python**: 3.13, managed via `.venv/`
 
-What You've Built So Far (Pre-Week 1)
-You've collected real production data from the pilot company — a rare and genuinely valuable position. Files in hand:
-FileWhat It Is3 月收货明细表 (Sān Yuè Shōuhuò Míngxì Biǎo)6,648-row ERP goods receipt export, March 20265 supplier reconciliation statements 奥雄 (Àoxióng), 鹏诚信 (Péngchéngxìn), 迈鼎 (Màidǐng), 展邦 (Zhǎnbāng), 丰裕达 (Fēngyùdá) — each in a different format 科目表 (Kēmù Biǎo)Kingdee K/3 Chart of AccountsK3 总账明细表 (K3 Zǒngzhàng Míngxì Biǎo)Kingdee General Ledger detail202601 月应付账款明细 AP ledger, January 2026ERP operation screenshotsHow the SGWERP reconciliation workflow looks in practiceDelivery note photosPhysical 送货单 (Sònghuòdān) samples
-You also have a detailed Technical Handoff document that maps every column, every gotcha, and the exact 4-layer matching engine logic — built from analysis of the real files.
+### Frontend (`frontend/`)
+- **Framework**: Next.js 16.2.2 (App Router) + React 19 + TypeScript
+- **Styling**: Tailwind CSS v4
+- **API Proxy**: next.config.ts rewrites `/api/*` → `http://localhost:8000/api/*`
 
-What You're Building First
-The supplier reconciliation engine. Specifically:
+### Key Directories
+```
+backend/
+  app/
+    models.py           # 13 SQLAlchemy ORM models
+    config.py           # Pydantic Settings
+    db.py               # Engine, SessionLocal, get_db()
+    main.py             # FastAPI app, 5 routers
+    routers/            # erp, statements, orgs, reconciliation, invoices
+    reconciliation/     # 4-layer matching engine + orchestrator + schemas
+    ingestion/          # GRN + statement ingestion pipelines
+    invoicing/          # OCR extraction + file storage + supplier matcher + schemas
+  db/migrations/versions/  # 0001–0004
+  tests/                   # 150+ tests
 
-Ingest ERP goods receipt data (SGWERP CSV export)
-Ingest supplier statements (5 different formats, auto-detect headers, normalize columns)
-Match on PO number + part number as primary keys
-Flag discrepancies: quantity delta, price delta, missing from ERP, missing from statement
-Output structured results via REST API — Richard builds the UI on top
+frontend/
+  app/
+    page.tsx                # Dashboard
+    ingestion/page.tsx      # GRN + statement upload
+    reconciliation/page.tsx # Run reconciliation, view results
+    invoices/page.tsx       # Upload, extract, list invoices
+    invoices/[id]/page.tsx  # Invoice detail with edit + status transitions
+    settings/page.tsx       # Org management + recon config
+    components/             # Sidebar, PageHeader, StatusBadge
+    lib/api.ts              # Fetch helper
+```
 
-Target: reduce reconciliation from 7 days to 1–2 days on real data, at the pilot company.
+## Implementation Status (as of 2026-04-20)
 
-The Broader Vision (What Comes After)
-Once reconciliation is validated:
+| Week | Scope | Status |
+|------|-------|--------|
+| 1–2 | Foundation + Data Ingestion | Complete |
+| 3 | 4-Layer Matching Engine | Complete |
+| 4 | Discrepancy Detection | Complete |
+| 5 | Reconciliation UI | Complete |
+| 6 | Testing (150+ tests) | Complete |
+| 7 | Invoice Processing (OCR) | Complete |
 
-Bank reconciliation, invoice processing + fapiao (发票, Fāpiào) OCR
-Multi-entity consolidation (HK holding + China factory)
-Accrual management, month-end close workflow
-13-week rolling cash forecast + prescriptive WhatsApp alerts ("pay Supplier X now, delay Supplier Y by 15 days, draw from HSBC facility")
-Margin intelligence: real-time P&L, cost driver breakdown, AR aging
+### What's Built
+- **Data Ingestion**: GRN CSV/XLSX upload with SSE progress, supplier statement ingestion with auto header detection + column mapping
+- **Reconciliation Engine**: exact match → fuzzy PO → multi-PO delivery note → AI (Claude Haiku). Configurable tolerances. Waterfall orchestrator.
+- **Discrepancy Detection**: qty over/under, price higher/lower, missing from ERP, missing from supplier. Resolve + bulk-resolve with audit trail.
+- **Invoice Processing**: Batch upload → OCR extraction (Claude Vision) → per-field confidence scoring → supplier auto-matching → status workflow (received→extracted→matched→approved→paid)
+- **Frontend**: 6-page Next.js skeleton with sidebar nav, all wired to backend API
 
-The Team & Division of Labor
+### What's Next
+- Wire resolve/bulk-resolve into reconciliation UI (backend endpoints exist)
+- Test OCR extraction with real fapiao samples
+- Run reconciliation against all 5 pilot suppliers
+- Bank reconciliation + fapiao cross-referencing
 
-Richard — product + frontend (Next.js, Cursor)
-Technical partner — backend (FastAPI, PostgreSQL, AWS ap-east-1)
+## Running Locally
 
-Two people. No salary burn. The pilot is free, which is the right call — you need proof before you charge.
+```bash
+# Backend (port 8000)
+cd backend && .venv/bin/uvicorn app.main:app --reload --port 8000
 
-Target Market & Pricing
-HK holding companies with Mainland China operations, $5M–$100M revenue, 2–5 legal entities, Kingdee-based finance teams doing manual Excel reconciliation.
+# Frontend (port 3000)
+cd frontend && npm run dev
 
-Starter: $500/month (1 entity)
-Growth: $1,200/month (up to 5 entities)
-Enterprise: $2,500/month (unlimited)
+# Tests
+cd backend && .venv/bin/python -m pytest tests/ -v
+```
 
-Justified against $15–25K/month in finance labor costs. The math works if the product works.
+## Team
+- **Richard** — product + frontend (Next.js)
+- **Technical partner** — backend (FastAPI, PostgreSQL)
 
-Competitive Position
-
-Mars/Minerva — US CPG only, doesn't operate in APAC. Not a threat yet.
-Agicap — European, dashboard-only, no ERP write-back, no Asia support.
-Your real moat: Kingdee/Yonyou integrations, APAC-native, actually writes to ERP, multi-currency multi-entity, WhatsApp-first alerts. None of that is easy to copy.
+## Target Market
+HK holding companies with Mainland China operations, $5M–$100M revenue, Kingdee-based finance teams.
+- Starter: $500/month (1 entity)
+- Growth: $1,200/month (up to 5 entities)
+- Enterprise: $2,500/month (unlimited)

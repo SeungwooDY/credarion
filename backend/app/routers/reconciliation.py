@@ -12,10 +12,13 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import (
+    ERPRecord,
     ReconciliationConfig,
     ReconciliationResult,
     ReconciliationRun,
+    StatementLineItem,
     Supplier,
+    SupplierStatement,
 )
 from app.reconciliation.orchestrator import run_reconciliation
 from app.reconciliation.schemas import (
@@ -78,6 +81,98 @@ def _result_to_detail(r: ReconciliationResult) -> ResultDetail:
 
 
 # --- Endpoints ---
+
+
+@router.get("/suppliers-ready")
+async def list_suppliers_with_readiness(
+    org_id: uuid.UUID = Query(...),
+    period: str = Query(...),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """List suppliers with their reconciliation readiness for a given period.
+
+    Returns suppliers that have ERP records OR statements for the period,
+    with counts and a ready flag (true when both ERP and statement exist).
+    Uses bulk queries for performance with large supplier lists.
+    """
+    from sqlalchemy import case, literal_column
+    from app.reconciliation.orchestrator import _period_date_range
+
+    period_start, period_end = _period_date_range(period)
+
+    # Bulk query: ERP counts per supplier
+    erp_counts = dict(
+        db.query(ERPRecord.supplier_id, func.count(ERPRecord.id))
+        .join(Supplier, ERPRecord.supplier_id == Supplier.id)
+        .filter(
+            Supplier.org_id == org_id,
+            ERPRecord.grn_date >= period_start,
+            ERPRecord.grn_date <= period_end,
+        )
+        .group_by(ERPRecord.supplier_id)
+        .all()
+    )
+
+    # Bulk query: statement row counts per supplier
+    stmt_counts = dict(
+        db.query(SupplierStatement.supplier_id, func.count(StatementLineItem.id))
+        .join(StatementLineItem, StatementLineItem.statement_id == SupplierStatement.id)
+        .join(Supplier, SupplierStatement.supplier_id == Supplier.id)
+        .filter(
+            Supplier.org_id == org_id,
+            SupplierStatement.period == period,
+        )
+        .group_by(SupplierStatement.supplier_id)
+        .all()
+    )
+
+    # Bulk query: latest reconciliation run per supplier
+    from sqlalchemy.orm import aliased
+    latest_runs = {}
+    runs = (
+        db.query(ReconciliationRun)
+        .join(Supplier, ReconciliationRun.supplier_id == Supplier.id)
+        .filter(
+            Supplier.org_id == org_id,
+            ReconciliationRun.period == period,
+        )
+        .order_by(ReconciliationRun.supplier_id, desc(ReconciliationRun.started_at))
+        .all()
+    )
+    for r in runs:
+        if r.supplier_id not in latest_runs:
+            latest_runs[r.supplier_id] = r
+
+    # Build result from suppliers that have any data
+    supplier_ids_with_data = set(erp_counts.keys()) | set(stmt_counts.keys())
+    suppliers = (
+        db.query(Supplier)
+        .filter(Supplier.org_id == org_id, Supplier.id.in_(supplier_ids_with_data))
+        .all()
+    )
+
+    result = []
+    for s in suppliers:
+        erp_count = erp_counts.get(s.id, 0)
+        stmt_rows = stmt_counts.get(s.id, 0)
+        latest_run = latest_runs.get(s.id)
+
+        result.append({
+            "id": str(s.id),
+            "name": s.name,
+            "vendor_code": s.vendor_code,
+            "erp_count": erp_count,
+            "statement_rows": stmt_rows,
+            "has_erp": erp_count > 0,
+            "has_statement": stmt_rows > 0,
+            "ready": erp_count > 0 and stmt_rows > 0,
+            "last_match_rate": float(latest_run.auto_match_rate) if latest_run and latest_run.auto_match_rate is not None else None,
+            "last_run_status": latest_run.status if latest_run else None,
+        })
+
+    # Sort: ready first, then by name
+    result.sort(key=lambda x: (not x["ready"], x["name"]))
+    return result
 
 
 @router.post("/run", response_model=ReconciliationRunResponse, status_code=201)

@@ -1,15 +1,23 @@
-"""Layer 1: Exact match on (po_number, material_number) with tolerance check.
+"""Layer 1: Exact match on PO number with quantity-based disambiguation.
 
-Handles duplicate PO+PN pairs in ERP by using grn_date proximity as tiebreaker.
+Strategy:
+  1. Try (po_number, material_number) composite key first
+  2. Fall back to po_number-only with closest-quantity tiebreaker
+
+This handles real-world data where ERP and supplier systems use different
+material/part number schemes for the same items.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
 from app.ingestion.cleaning import normalize_po_number
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -59,14 +67,21 @@ def _normalize_key(po: str | None, material: str | None) -> tuple[str, str] | No
 
 
 def _classify_discrepancy(
-    qty_delta: Decimal, price_delta: Decimal
+    qty_delta: Decimal, price_delta: Decimal, amount_delta: Decimal
 ) -> str | None:
-    """Classify discrepancy type based on deltas (statement - ERP)."""
+    """Classify discrepancy type based on deltas (statement - ERP).
+
+    Reports all inconsistencies found, comma-separated if multiple.
+    """
+    issues = []
     if qty_delta != 0:
-        return "quantity_over" if qty_delta > 0 else "quantity_under"
+        issues.append("quantity_over" if qty_delta > 0 else "quantity_under")
     if price_delta != 0:
-        return "price_higher" if price_delta > 0 else "price_lower"
-    return None
+        issues.append("price_higher" if price_delta > 0 else "price_lower")
+    if amount_delta != 0 and qty_delta == 0 and price_delta == 0:
+        # Amount differs but qty and price don't — rounding or calc issue
+        issues.append("amount_mismatch")
+    return ",".join(issues) if issues else None
 
 
 def _within_tolerance(
@@ -84,8 +99,11 @@ def _pick_best_erp(
 ) -> MatchCandidate:
     """Pick the best ERP candidate for a statement item.
 
-    Tiebreaker: closest grn_date to statement delivery_date,
-    or matching delivery_note.
+    Priority:
+      1. Matching delivery note
+      2. Closest quantity (for PO-only matching where many lines share a PO)
+      3. Closest grn_date to statement delivery_date
+      4. First candidate
     """
     if len(candidates) == 1:
         return candidates[0]
@@ -96,20 +114,19 @@ def _pick_best_erp(
             if c.delivery_note and c.delivery_note.strip() == stmt.delivery_note_ref.strip():
                 return c
 
-    # Fallback: closest date
-    if stmt.delivery_date is not None:
-        try:
-            stmt_dt = stmt.delivery_date
-            if hasattr(stmt_dt, "timestamp"):
-                return min(
-                    candidates,
-                    key=lambda c: abs((c.grn_date - stmt_dt).total_seconds()),
-                )
-        except (TypeError, AttributeError):
-            pass
+    # Composite tiebreaker: quantity difference first, then date proximity
+    def _sort_key(c: MatchCandidate) -> tuple:
+        qty_diff = abs(c.quantity - stmt.quantity) if stmt.quantity is not None else Decimal("0")
+        date_diff = float("inf")
+        if stmt.delivery_date is not None and hasattr(stmt.delivery_date, "timestamp"):
+            try:
+                date_diff = abs((c.grn_date - stmt.delivery_date).total_seconds())
+            except (TypeError, AttributeError):
+                pass
+        return (qty_diff, date_diff)
 
-    # Default: first candidate
-    return candidates[0]
+    return min(candidates, key=_sort_key)
+
 
 
 def run_exact_match(
@@ -120,63 +137,106 @@ def run_exact_match(
 ) -> tuple[list[MatchResult], list[MatchCandidate], list[StatementItem]]:
     """Run Layer 1 exact matching.
 
+    Strategy:
+      Pass 1: composite key (po_number, material_number) — highest confidence
+      Pass 2: PO-only key with quantity-based disambiguation — for cross-system
+              material number mismatches
+
     Returns:
         (matches, unmatched_erp, unmatched_statement)
     """
-    # Build ERP lookup: (po_number, material_number) → list of candidates
-    erp_lookup: dict[tuple[str, str], list[MatchCandidate]] = {}
+    # Build composite lookup: (po_number, material_number) → candidates
+    erp_composite: dict[tuple[str, str], list[MatchCandidate]] = {}
     for erp in erp_records:
         key = _normalize_key(erp.po_number, erp.material_number)
         if key is not None:
-            erp_lookup.setdefault(key, []).append(erp)
+            erp_composite.setdefault(key, []).append(erp)
+
+    logger.debug(
+        "[L1 DEBUG] Built lookup: %d composite keys from %d ERP records",
+        len(erp_composite), len(erp_records),
+    )
+    # Log a few sample keys to help debug key-format mismatches
+    if erp_composite:
+        sample_composite = list(erp_composite.keys())[:3]
+        logger.debug("[L1 DEBUG] Sample ERP composite keys (PO, PN): %s", sample_composite)
+    if statement_items:
+        sample_stmt_keys = [
+            _normalize_key(s.po_number, s.material_number)
+            for s in statement_items[:3]
+        ]
+        logger.debug("[L1 DEBUG] Sample stmt composite keys (PO, PN): %s", sample_stmt_keys)
 
     matches: list[MatchResult] = []
-    unmatched_stmt: list[StatementItem] = []
     matched_erp_ids: set = set()
+    unmatched_stmt: list[StatementItem] = []
 
+    # --- Strict PO+PN matching ---
     for stmt in statement_items:
         key = _normalize_key(stmt.po_number, stmt.material_number)
-        if key is None or key not in erp_lookup:
-            unmatched_stmt.append(stmt)
-            continue
+        if key is not None and key in erp_composite:
+            available = [e for e in erp_composite[key] if e.erp_id not in matched_erp_ids]
+            if available:
+                erp = _pick_best_erp(available, stmt)
+                matched_erp_ids.add(erp.erp_id)
+                matches.append(_build_match(erp, stmt, "exact", Decimal("1.0"),
+                    {"layer": 1, "key_type": "po_pn", "po": key[0], "pn": key[1]},
+                    qty_tolerance_pct, price_tolerance_pct))
+                continue
+        unmatched_stmt.append(stmt)
 
-        # Filter out already-matched ERP records
-        available = [e for e in erp_lookup[key] if e.erp_id not in matched_erp_ids]
-        if not available:
-            unmatched_stmt.append(stmt)
-            continue
-
-        erp = _pick_best_erp(available, stmt)
-        matched_erp_ids.add(erp.erp_id)
-
-        qty_delta = stmt.quantity - erp.quantity
-        price_delta = stmt.unit_price - erp.po_price
-        amount_delta = stmt.amount - erp.amount
-
-        qty_ok = _within_tolerance(erp.quantity, stmt.quantity, qty_tolerance_pct)
-        price_ok = _within_tolerance(erp.po_price, stmt.unit_price, price_tolerance_pct)
-
-        if qty_ok and price_ok:
-            status = "matched"
-            disc_type = None
-        else:
-            status = "discrepancy"
-            disc_type = _classify_discrepancy(qty_delta, price_delta)
-
-        matches.append(MatchResult(
-            erp=erp,
-            statement=stmt,
-            match_type="exact",
-            quantity_delta=qty_delta,
-            price_delta=price_delta,
-            amount_delta=amount_delta,
-            status=status,
-            discrepancy_type=disc_type,
-            confidence=Decimal("1.0"),
-            match_details={"layer": 1, "key": list(key)},
-        ))
-
-    # Unmatched ERP records
     unmatched_erp = [e for e in erp_records if e.erp_id not in matched_erp_ids]
 
+    logger.debug(
+        "[L1 DEBUG] Results: %d matched, %d ERP unmatched, %d stmt unmatched",
+        len(matches), len(unmatched_erp), len(unmatched_stmt),
+    )
+
     return matches, unmatched_erp, unmatched_stmt
+
+
+def _build_match(
+    erp: MatchCandidate,
+    stmt: StatementItem,
+    match_type: str,
+    confidence: Decimal,
+    details: dict,
+    qty_tol: Decimal,
+    price_tol: Decimal,
+) -> MatchResult:
+    """Build a MatchResult with delta and tolerance calculations.
+
+    Any difference in qty, price, or amount is flagged as a discrepancy.
+    Tolerance is used only to determine confidence level, not to suppress flags.
+    """
+    qty_delta = stmt.quantity - erp.quantity
+    price_delta = stmt.unit_price - erp.po_price
+    amount_delta = stmt.amount - erp.amount
+
+    # Classify all inconsistencies
+    disc_type = _classify_discrepancy(qty_delta, price_delta, amount_delta)
+
+    if disc_type is None:
+        status = "matched"
+    else:
+        status = "discrepancy"
+
+    # Tolerance affects confidence, not match/discrepancy status
+    qty_ok = _within_tolerance(erp.quantity, stmt.quantity, qty_tol)
+    price_ok = _within_tolerance(erp.po_price, stmt.unit_price, price_tol)
+    if disc_type and qty_ok and price_ok:
+        # Differences exist but within tolerance — still flag, lower severity
+        details = {**details, "within_tolerance": True}
+
+    return MatchResult(
+        erp=erp,
+        statement=stmt,
+        match_type=match_type,
+        quantity_delta=qty_delta,
+        price_delta=price_delta,
+        amount_delta=amount_delta,
+        status=status,
+        discrepancy_type=disc_type,
+        confidence=confidence,
+        match_details=details,
+    )

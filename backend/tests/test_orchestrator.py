@@ -62,15 +62,18 @@ class TestOrchestratorWaterfall:
             ),
         ]
 
-        # Layer 1
+        # Layer 1 — strict PO+PN: only 428759/MAT001 matches (exact key)
+        # 0428760/mat002 fails L1 because material case differs
         l1_matches, unmatched_erp, unmatched_stmt = run_exact_match(erp, stmt)
-        assert len(l1_matches) == 1  # Only exact match on 428759
+        assert len(l1_matches) == 1
+        assert l1_matches[0].erp.erp_id == 1
 
-        # Layer 2 receives only unmatched
+        # Layer 2 — fuzzy normalization catches 0428760→428760, mat002→MAT002
         l2_matches, unmatched_erp, unmatched_stmt = run_fuzzy_match(
             unmatched_erp, unmatched_stmt
         )
-        assert len(l2_matches) == 1  # Fuzzy matches 0428760 → 428760
+        assert len(l2_matches) == 1
+        assert l2_matches[0].erp.erp_id == 2
         assert len(unmatched_erp) == 0
         assert len(unmatched_stmt) == 0
 

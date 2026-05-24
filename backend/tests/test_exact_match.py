@@ -98,26 +98,21 @@ class TestExactMatch:
         matches, _, _ = run_exact_match(erp, stmt)
         assert matches[0].discrepancy_type == "price_lower"
 
-    def test_within_tolerance(self):
-        """0.4% difference should be within 0.5% tolerance."""
+    def test_within_tolerance_still_flags(self):
+        """Any qty difference is flagged — tolerance only noted in details."""
         erp = [_erp(qty="1000")]
-        stmt = [_stmt(qty="1004")]  # 0.4% diff
-        matches, _, _ = run_exact_match(erp, stmt)
-        assert matches[0].status == "matched"
-
-    def test_at_tolerance_boundary(self):
-        """0.5% exactly should still be within tolerance."""
-        erp = [_erp(qty="1000")]
-        stmt = [_stmt(qty="1005")]  # exactly 0.5%
-        matches, _, _ = run_exact_match(erp, stmt)
-        assert matches[0].status == "matched"
-
-    def test_beyond_tolerance(self):
-        """0.6% difference exceeds 0.5% tolerance."""
-        erp = [_erp(qty="1000")]
-        stmt = [_stmt(qty="1006")]  # 0.6%
+        stmt = [_stmt(qty="1004", amount="10040.00")]  # 0.4% diff
         matches, _, _ = run_exact_match(erp, stmt)
         assert matches[0].status == "discrepancy"
+        assert matches[0].match_details.get("within_tolerance") is True
+
+    def test_beyond_tolerance(self):
+        """Larger difference flagged without within_tolerance note."""
+        erp = [_erp(qty="1000")]
+        stmt = [_stmt(qty="1006", amount="10060.00")]  # 0.6%
+        matches, _, _ = run_exact_match(erp, stmt)
+        assert matches[0].status == "discrepancy"
+        assert matches[0].match_details.get("within_tolerance") is None
 
     def test_unmatched_statement(self):
         erp = [_erp(po="428759")]
@@ -127,11 +122,13 @@ class TestExactMatch:
         assert len(unmatched_erp) == 1
         assert len(unmatched_stmt) == 1
 
-    def test_missing_material_number(self):
+    def test_missing_material_number_does_not_match(self):
+        """When material number is missing, strict PO+PN match fails."""
         stmt = [_stmt(material=None)]
         erp = [_erp()]
-        matches, _, unmatched_stmt = run_exact_match(erp, [stmt[0]])
+        matches, unmatched_erp, unmatched_stmt = run_exact_match(erp, [stmt[0]])
         assert len(matches) == 0
+        assert len(unmatched_erp) == 1
         assert len(unmatched_stmt) == 1
 
     def test_duplicate_po_tiebreaker_by_date(self):
