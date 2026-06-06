@@ -32,10 +32,14 @@ def filter_summary_rows(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def normalize_po_number(val: object) -> str | None:
-    """Normalize PO numbers: '428759.0' → '428759', strip whitespace."""
+    """Normalize PO numbers: '428759.0' → '428759', '428292-1' → '428292', strip whitespace."""
     if pd.isna(val) or str(val).strip() == "" or str(val).strip().lower() == "nan":
         return None
     s = str(val).strip()
+    # Strip PO revision suffixes: "428292-1" → "428292"
+    # Suppliers reference revised POs with -N suffix, ERP uses the base number
+    # Only strip 1-2 digit suffixes to avoid mangling POs with internal dashes (e.g. "428-759")
+    s = re.sub(r"-\d{1,2}$", "", s)
     # Float-like PO numbers from Excel: "428759.0" → "428759"
     try:
         f = float(s)

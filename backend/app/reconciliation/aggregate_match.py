@@ -114,6 +114,7 @@ def run_aggregate_match(
     statement_items: list[StatementItem],
     qty_tolerance_pct: Decimal = Decimal("0.50"),
     price_tolerance_pct: Decimal = Decimal("0.50"),
+    amt_tolerance_pct: Decimal = Decimal("1.0"),
 ) -> tuple[list[MatchResult], list[MatchCandidate], list[StatementItem]]:
     """Run aggregate matching on unmatched items.
 
@@ -151,7 +152,7 @@ def run_aggregate_match(
         stmt_total_amt = sum(s.amount for s in stmt_group)
 
         qty_ok = _within_tolerance(erp_total_qty, stmt_total_qty, qty_tolerance_pct)
-        amt_ok = _within_tolerance(erp_total_amt, stmt_total_amt, Decimal("1.0"))
+        amt_ok = _within_tolerance(erp_total_amt, stmt_total_amt, amt_tolerance_pct)
 
         if not qty_ok and not amt_ok:
             continue
@@ -192,7 +193,7 @@ def run_aggregate_match(
         stmt_total_amt = sum(s.amount for s in stmt_group)
 
         qty_ok = _within_tolerance(erp_total_qty, stmt_total_qty, qty_tolerance_pct)
-        amt_ok = _within_tolerance(erp_total_amt, stmt_total_amt, Decimal("1.0"))
+        amt_ok = _within_tolerance(erp_total_amt, stmt_total_amt, amt_tolerance_pct)
 
         if not qty_ok and not amt_ok:
             continue
