@@ -39,7 +39,18 @@ router = APIRouter(prefix="/api/v1/reconciliation", tags=["reconciliation"])
 # --- Helpers ---
 
 
-def _run_to_summary(run: ReconciliationRun) -> RunSummary:
+def _run_to_summary(run: ReconciliationRun, db: Session | None = None) -> RunSummary:
+    erp_not_in_stmt = 0
+    if db and run.id:
+        erp_not_in_stmt = (
+            db.query(func.count(ReconciliationResult.id))
+            .filter(
+                ReconciliationResult.run_id == run.id,
+                ReconciliationResult.match_type == "unmatched",
+                ReconciliationResult.discrepancy_type == "missing_from_statement",
+            )
+            .scalar() or 0
+        )
     return RunSummary(
         id=str(run.id),
         supplier_id=str(run.supplier_id),
@@ -51,6 +62,7 @@ def _run_to_summary(run: ReconciliationRun) -> RunSummary:
         matched_count=run.matched_count,
         discrepancy_count=run.discrepancy_count,
         unmatched_count=run.unmatched_count,
+        erp_not_in_statement=erp_not_in_stmt,
         auto_match_rate=float(run.auto_match_rate) if run.auto_match_rate is not None else None,
         started_at=run.started_at,
         completed_at=run.completed_at,
@@ -181,6 +193,25 @@ async def trigger_reconciliation(
     db: Session = Depends(get_db),
 ) -> ReconciliationRunResponse:
     """Trigger reconciliation for a supplier+period."""
+    # Clean up stale "running" runs (stuck for > 5 minutes) before checking
+    from datetime import timedelta
+    stale_cutoff = datetime.utcnow() - timedelta(minutes=5)
+    stale_runs = (
+        db.query(ReconciliationRun)
+        .filter(
+            ReconciliationRun.supplier_id == body.supplier_id,
+            ReconciliationRun.period == body.period,
+            ReconciliationRun.status == "running",
+            ReconciliationRun.started_at < stale_cutoff,
+        )
+        .all()
+    )
+    for stale in stale_runs:
+        stale.status = "failed"
+        stale.completed_at = datetime.utcnow()
+    if stale_runs:
+        db.commit()
+
     # Check for existing running run
     existing = (
         db.query(ReconciliationRun)
@@ -204,7 +235,7 @@ async def trigger_reconciliation(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Reconciliation failed: {e}")
 
-    return ReconciliationRunResponse(run=_run_to_summary(run))
+    return ReconciliationRunResponse(run=_run_to_summary(run, db))
 
 
 @router.get("/runs", response_model=list[RunSummary])
@@ -225,7 +256,7 @@ async def list_runs(
     if status:
         q = q.filter(ReconciliationRun.status == status)
     runs = q.order_by(desc(ReconciliationRun.started_at)).offset(offset).limit(limit).all()
-    return [_run_to_summary(r) for r in runs]
+    return [_run_to_summary(r, db) for r in runs]
 
 
 @router.get("/runs/{run_id}", response_model=RunSummary)
@@ -237,7 +268,7 @@ async def get_run(
     run = db.query(ReconciliationRun).filter(ReconciliationRun.id == run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    return _run_to_summary(run)
+    return _run_to_summary(run, db)
 
 
 @router.get("/results", response_model=list[ResultDetail])
@@ -423,6 +454,150 @@ async def export_results(
             media_type="text/csv",
             headers={"Content-Disposition": "attachment; filename=reconciliation_report.csv"},
         )
+
+
+@router.get("/mismatches")
+async def list_mismatches(
+    org_id: uuid.UUID = Query(...),
+    period: str = Query(...),
+    supplier_id: uuid.UUID | None = None,
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """Return mismatched/discrepancy results grouped by supplier with enriched ERP+statement data.
+
+    Each supplier entry includes summary counts and individual mismatch items
+    with PO number, material number, quantities, prices, and amounts from both sides.
+    """
+    from app.reconciliation.orchestrator import _period_date_range
+
+    # Find the latest run per supplier for this period
+    latest_runs_q = (
+        db.query(ReconciliationRun)
+        .join(Supplier, ReconciliationRun.supplier_id == Supplier.id)
+        .filter(
+            Supplier.org_id == org_id,
+            ReconciliationRun.period == period,
+            ReconciliationRun.status == "completed",
+        )
+    )
+    if supplier_id:
+        latest_runs_q = latest_runs_q.filter(ReconciliationRun.supplier_id == supplier_id)
+
+    latest_runs_q = latest_runs_q.order_by(
+        ReconciliationRun.supplier_id, desc(ReconciliationRun.started_at)
+    )
+    # Deduplicate to latest run per supplier
+    latest_runs: dict[uuid.UUID, ReconciliationRun] = {}
+    for run in latest_runs_q.all():
+        if run.supplier_id not in latest_runs:
+            latest_runs[run.supplier_id] = run
+
+    if not latest_runs:
+        return []
+
+    # Fetch all discrepancy/unmatched results for these runs
+    run_ids = [r.id for r in latest_runs.values()]
+    results = (
+        db.query(ReconciliationResult)
+        .filter(
+            ReconciliationResult.run_id.in_(run_ids),
+            ReconciliationResult.status.in_(["discrepancy", "resolved"]),
+        )
+        .all()
+    )
+
+    if not results:
+        return []
+
+    # Bulk-load related ERP records and statement line items
+    erp_ids = [r.erp_record_id for r in results if r.erp_record_id]
+    stmt_ids = [r.statement_line_id for r in results if r.statement_line_id]
+
+    erp_map: dict[uuid.UUID, ERPRecord] = {}
+    if erp_ids:
+        for e in db.query(ERPRecord).filter(ERPRecord.id.in_(erp_ids)).all():
+            erp_map[e.id] = e
+
+    stmt_map: dict[uuid.UUID, StatementLineItem] = {}
+    if stmt_ids:
+        for s in db.query(StatementLineItem).filter(StatementLineItem.id.in_(stmt_ids)).all():
+            stmt_map[s.id] = s
+
+    # Load supplier info
+    supplier_ids = list(latest_runs.keys())
+    suppliers = {
+        s.id: s
+        for s in db.query(Supplier).filter(Supplier.id.in_(supplier_ids)).all()
+    }
+
+    # Group results by supplier
+    from collections import defaultdict
+    by_supplier: dict[uuid.UUID, list] = defaultdict(list)
+    for r in results:
+        erp = erp_map.get(r.erp_record_id) if r.erp_record_id else None
+        stmt = stmt_map.get(r.statement_line_id) if r.statement_line_id else None
+
+        item = {
+            "id": str(r.id),
+            "match_type": r.match_type,
+            "status": r.status,
+            "discrepancy_type": r.discrepancy_type,
+            "quantity_delta": float(r.quantity_delta) if r.quantity_delta is not None else None,
+            "price_delta": float(r.price_delta) if r.price_delta is not None else None,
+            "amount_delta": float(r.amount_delta) if r.amount_delta is not None else None,
+            "confidence": float(r.confidence) if r.confidence is not None else None,
+            "resolution_note": r.resolution_note,
+            "erp": {
+                "po_number": erp.po_number,
+                "material_number": erp.material_number,
+                "quantity": float(erp.quantity),
+                "po_price": float(erp.po_price),
+                "amount": float(erp.amount),
+                "grn_date": erp.grn_date.isoformat() if erp.grn_date else None,
+            } if erp else None,
+            "statement": {
+                "po_number": stmt.po_number,
+                "material_number": stmt.material_number,
+                "quantity": float(stmt.quantity),
+                "unit_price": float(stmt.unit_price),
+                "amount": float(stmt.amount),
+                "delivery_date": stmt.delivery_date.isoformat() if stmt.delivery_date else None,
+            } if stmt else None,
+        }
+        by_supplier[r.supplier_id].append(item)
+
+    # Build response
+    result_list = []
+    for sid, items in by_supplier.items():
+        s = suppliers.get(sid)
+        run = latest_runs.get(sid)
+        if not s or not run:
+            continue
+
+        unmatched_erp = sum(1 for i in items if i["discrepancy_type"] == "missing_from_statement")
+        unmatched_stmt = sum(1 for i in items if i["discrepancy_type"] == "missing_from_erp")
+        qty_issues = sum(1 for i in items if i["discrepancy_type"] and "quantity" in i["discrepancy_type"])
+        price_issues = sum(1 for i in items if i["discrepancy_type"] and "price" in i["discrepancy_type"])
+
+        result_list.append({
+            "supplier_id": str(sid),
+            "supplier_name": s.name,
+            "vendor_code": s.vendor_code,
+            "run_id": str(run.id),
+            "match_rate": float(run.auto_match_rate) if run.auto_match_rate is not None else None,
+            "total_erp": run.total_erp,
+            "total_statement": run.total_statement,
+            "total_mismatches": len(items),
+            "unmatched_erp": unmatched_erp,
+            "unmatched_stmt": unmatched_stmt,
+            "qty_issues": qty_issues,
+            "price_issues": price_issues,
+            "items": items,
+        })
+
+    # Sort by total mismatches descending
+    result_list.sort(key=lambda x: x["total_mismatches"], reverse=True)
+    return result_list
 
 
 @router.get("/config/{org_id}", response_model=ConfigResponse)

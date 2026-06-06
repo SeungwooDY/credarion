@@ -163,8 +163,14 @@ class TestPONormalization:
     def test_already_int(self):
         assert normalize_po_number("428759") == "428759"
 
-    def test_string_po(self):
-        assert normalize_po_number("428292-1") == "428292-1"
+    def test_revision_suffix_stripped(self):
+        # Revision suffix -1/-2 stripped (supplier uses revised PO, ERP uses base)
+        assert normalize_po_number("428292-1") == "428292"
+        assert normalize_po_number("429139-2") == "429139"
+
+    def test_internal_dash_preserved(self):
+        # Internal dashes with 3+ digit segments are NOT revision suffixes
+        assert normalize_po_number("428-759") == "428-759"
 
     def test_none_handling(self):
         assert normalize_po_number(None) is None

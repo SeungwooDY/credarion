@@ -46,6 +46,7 @@ async def ingest_supplier_statement(
     supplier_id: uuid.UUID,
     period: str,
     db: Session,
+    force_remap: bool = False,
 ) -> IngestionResult:
     """Full ingestion pipeline for a supplier statement file.
 
@@ -67,8 +68,35 @@ async def ingest_supplier_statement(
         result.errors.append(f"Failed to read file: {e}")
         return result
 
-    # Step 2: Check cached mapping first
-    cached = get_cached_mapping(supplier_id, db)
+    # Step 2: Check cached mapping first (skip if force_remap)
+    cached = get_cached_mapping(supplier_id, db) if not force_remap else None
+    if cached and cached.source != "manual":
+        # Validate cached mapping: re-score material_number column against sample data
+        # to catch stale mappings where the wrong column was picked
+        from app.ingestion.column_mapping import _score_material_column
+        try:
+            _cached_header_row = cached.header_row
+            raw_hdrs = [str(v) if pd.notna(v) else "" for v in df_raw.iloc[_cached_header_row]]
+            _cached_headers = clean_header_cells(raw_hdrs)
+            mat_col = cached.column_map.get("material_number")
+            if mat_col and mat_col in _cached_headers:
+                mat_idx = _cached_headers.index(mat_col)
+                _sample_start = _cached_header_row + 1
+                _sample_end = min(_sample_start + 5, len(df_raw))
+                _samples = [
+                    [str(v) if pd.notna(v) else "" for v in df_raw.iloc[i]]
+                    for i in range(_sample_start, _sample_end)
+                ]
+                score = _score_material_column(mat_col, mat_idx, _samples)
+                if score < 0.5:
+                    logger.warning(
+                        "Cached mapping for %s has low material_number score (%.2f for '%s'), re-mapping",
+                        supplier_id, score, mat_col,
+                    )
+                    cached = None  # Force re-mapping
+        except Exception:
+            pass  # If validation fails, just use the cached mapping
+
     if cached:
         header_row = cached.header_row
         column_map = cached.column_map

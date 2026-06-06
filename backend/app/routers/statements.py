@@ -240,6 +240,7 @@ async def upload_statement(
         supplier_id=supplier_id,
         period=period,
         db=db,
+        force_remap=replace,
     )
 
     response = IngestionResponse(

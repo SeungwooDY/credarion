@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { href: "/", label: "Dashboard" },
   { href: "/ingestion", label: "Data Ingestion" },
   { href: "/reconciliation", label: "Reconciliation" },
+  { href: "/mismatches", label: "Mismatches" },
   { href: "/invoices", label: "Invoices" },
   { href: "/settings", label: "Settings" },
 ];

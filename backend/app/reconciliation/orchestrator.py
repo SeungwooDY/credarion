@@ -45,54 +45,57 @@ def _split_by_balance(
     list[MatchCandidate], list[StatementItem],  # balanced (for 1:1 matching)
     list[MatchCandidate], list[StatementItem],  # imbalanced (for aggregate matching)
 ]:
-    """Pre-split items into balanced and imbalanced PO groups.
+    """Pre-split items into balanced and imbalanced groups.
 
-    Balanced: stmt line count <= ERP record count for the PO → suitable for 1:1 matching
-    Imbalanced: stmt line count > ERP record count → supplier has more granular line
-    items than ERP (consolidation pattern), so aggregate matching should handle these.
+    Checks at PO+PN (composite key) level, not just PO level. This catches
+    cases where a PO looks balanced overall but a specific part number has
+    many more statement lines than ERP records (supplier records individual
+    deliveries, ERP consolidates into fewer GRN receipts).
+
+    Balanced: stmt line count <= ERP record count for the PO+PN → 1:1 matching
+    Imbalanced: stmt line count > ERP record count → aggregate matching
     """
-    erp_by_po: dict[str, list[MatchCandidate]] = defaultdict(list)
+    # Group by PO+PN composite key
+    erp_by_key: dict[tuple[str, str], list[MatchCandidate]] = defaultdict(list)
     for e in erp_candidates:
         po = normalize_po_number(e.po_number)
-        if po:
-            erp_by_po[po].append(e)
+        pn = (e.material_number or "").strip()
+        if po and pn:
+            erp_by_key[(po, pn)].append(e)
+        elif po:
+            erp_by_key[(po, "")].append(e)
 
-    stmt_by_po: dict[str, list[StatementItem]] = defaultdict(list)
+    stmt_by_key: dict[tuple[str, str], list[StatementItem]] = defaultdict(list)
     for s in stmt_items:
         po = normalize_po_number(s.po_number)
-        if po:
-            stmt_by_po[po].append(s)
+        pn = (s.material_number or "").strip()
+        if po and pn:
+            stmt_by_key[(po, pn)].append(s)
+        elif po:
+            stmt_by_key[(po, "")].append(s)
 
-    # Only defer PO groups where the statement has significantly more lines
-    # than ERP (1.4x+). Slightly imbalanced groups work better with 1:1 matching
-    # since the extra lines are just cross-month spillover.
+    # Detect imbalanced PO+PN groups where statement has more lines than ERP
     IMBALANCE_THRESHOLD = 1.4
-    imbalanced_pos: set[str] = set()
-    for po in stmt_by_po:
-        stmt_count = len(stmt_by_po[po])
-        erp_count = len(erp_by_po.get(po, []))
+    imbalanced_keys: set[tuple[str, str]] = set()
+    for key in stmt_by_key:
+        stmt_count = len(stmt_by_key[key])
+        erp_count = len(erp_by_key.get(key, []))
         if erp_count > 0 and stmt_count > erp_count * IMBALANCE_THRESHOLD:
-            imbalanced_pos.add(po)
+            imbalanced_keys.add(key)
 
-    # Split ERP
-    balanced_erp = []
-    imbalanced_erp = []
-    for e in erp_candidates:
-        po = normalize_po_number(e.po_number)
-        if po in imbalanced_pos:
-            imbalanced_erp.append(e)
-        else:
-            balanced_erp.append(e)
+    # Build sets of IDs to route to aggregate
+    imbalanced_erp_ids: set = set()
+    imbalanced_stmt_ids: set = set()
+    for key in imbalanced_keys:
+        for e in erp_by_key.get(key, []):
+            imbalanced_erp_ids.add(e.erp_id)
+        for s in stmt_by_key.get(key, []):
+            imbalanced_stmt_ids.add(s.line_id)
 
-    # Split stmt
-    balanced_stmt = []
-    imbalanced_stmt = []
-    for s in stmt_items:
-        po = normalize_po_number(s.po_number)
-        if po in imbalanced_pos:
-            imbalanced_stmt.append(s)
-        else:
-            balanced_stmt.append(s)
+    balanced_erp = [e for e in erp_candidates if e.erp_id not in imbalanced_erp_ids]
+    imbalanced_erp = [e for e in erp_candidates if e.erp_id in imbalanced_erp_ids]
+    balanced_stmt = [s for s in stmt_items if s.line_id not in imbalanced_stmt_ids]
+    imbalanced_stmt = [s for s in stmt_items if s.line_id in imbalanced_stmt_ids]
 
     return balanced_erp, balanced_stmt, imbalanced_erp, imbalanced_stmt
 
@@ -305,8 +308,8 @@ async def run_reconciliation(
         run.total_statement = len(stmt_items)
 
         # Log sample PO numbers from each side to check alignment
-        erp_pos = set(normalize_po_number(e.po_number) for e in erp_candidates)
-        stmt_pos = set(normalize_po_number(s.po_number) for s in stmt_items if s.po_number)
+        erp_pos = {normalize_po_number(e.po_number) for e in erp_candidates} - {None}
+        stmt_pos = {normalize_po_number(s.po_number) for s in stmt_items if s.po_number} - {None}
         common_pos = erp_pos & stmt_pos
         logger.info(
             "[RECON DEBUG] PO overlap: %d ERP POs, %d statement POs, %d in common (%.0f%% overlap)",
@@ -481,13 +484,34 @@ async def run_reconciliation(
         matched = sum(1 for r in all_results if r.status == "matched")
         discrepancy = sum(1 for r in all_results if r.status == "discrepancy")
         unmatched = sum(1 for r in all_results if r.match_type == "unmatched")
-        total = len(all_results)
+
+        # Match rate is statement-centric: how well can we verify the supplier's
+        # claims against ERP? ERP-only items (not in statement) are informational
+        # and don't drag down the rate.
+        stmt_matched = sum(
+            1 for r in all_results
+            if r.status == "matched" and r.statement_line_id is not None
+        )
+        stmt_total = run.total_statement  # total statement line items
+        unmatched_erp_count = sum(
+            1 for r in all_results
+            if r.match_type == "unmatched" and r.discrepancy_type == "missing_from_statement"
+        )
 
         run.matched_count = matched
         run.discrepancy_count = discrepancy
         run.unmatched_count = unmatched
         run.auto_match_rate = (
-            Decimal(str(round(matched / total * 100, 2))) if total > 0 else Decimal("0")
+            Decimal(str(round(stmt_matched / stmt_total * 100, 2)))
+            if stmt_total and stmt_total > 0 else Decimal("0")
+        )
+
+        logger.info(
+            "[RECON DEBUG] Match rate: %d/%d statement items matched (%.1f%%). "
+            "%d ERP items not in statement (informational).",
+            stmt_matched, stmt_total,
+            float(run.auto_match_rate),
+            unmatched_erp_count,
         )
         run.status = "completed"
         run.completed_at = datetime.utcnow()

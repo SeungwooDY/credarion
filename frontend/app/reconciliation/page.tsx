@@ -31,6 +31,7 @@ interface RunResult {
     matched_count: number;
     discrepancy_count: number;
     unmatched_count: number;
+    erp_not_in_statement: number;
     auto_match_rate: number | null;
   };
 }
@@ -330,6 +331,11 @@ export default function ReconciliationPage() {
               </div>
             ))}
           </div>
+          {run.erp_not_in_statement > 0 && (
+            <div className="text-xs text-zinc-500 bg-zinc-50 border border-zinc-200 rounded px-3 py-2 mb-6">
+              <span className="font-medium text-zinc-600">{run.erp_not_in_statement} ERP records</span> were not included in the supplier statement and are excluded from the match rate.
+            </div>
+          )}
         </>
       )}
 

@@ -11,6 +11,7 @@ from decimal import Decimal
 from typing import Any
 
 import anthropic
+import httpx
 
 from app.reconciliation.exact_match import (
     MatchCandidate,
@@ -22,7 +23,7 @@ from app.reconciliation.exact_match import (
 logger = logging.getLogger(__name__)
 
 BATCH_SIZE = 15
-MAX_AI_BATCHES = 10  # Cap total API calls to avoid timeouts
+MAX_AI_BATCHES = 3  # Cap total API calls to avoid timeouts
 CONFIDENCE_THRESHOLD = Decimal("0.70")
 
 _SYSTEM_PROMPT = """You are a supplier reconciliation assistant for a Chinese manufacturing company.
@@ -90,7 +91,10 @@ async def run_ai_match(
         return [], erp_records, statement_items
 
     try:
-        client = anthropic.AsyncAnthropic(api_key=anthropic_api_key)
+        client = anthropic.AsyncAnthropic(
+            api_key=anthropic_api_key,
+            timeout=httpx.Timeout(15.0, connect=5.0),
+        )
     except Exception as e:
         logger.warning("AI layer unavailable: %s", e)
         return [], erp_records, statement_items

@@ -49,6 +49,7 @@ class RunSummary(BaseModel):
     matched_count: int
     discrepancy_count: int
     unmatched_count: int
+    erp_not_in_statement: int = 0
     auto_match_rate: float | None = None
     started_at: datetime
     completed_at: datetime | None = None
