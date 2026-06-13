@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import PageHeader from "../components/page-header";
 import StatusBadge from "../components/status-badge";
+import SpreadsheetGrid, { type GridColumn, type GridRow } from "../components/spreadsheet-grid";
 
 interface Org {
   id: string;
@@ -51,6 +52,7 @@ interface SupplierMismatch {
 }
 
 type FilterType = "all" | "missing_from_erp" | "missing_from_statement" | "quantity" | "price" | "resolved";
+type ViewMode = "review" | "spreadsheet";
 
 function formatNum(n: number | null | undefined, decimals = 2): string {
   if (n == null) return "-";
@@ -135,7 +137,7 @@ function MatchExplanation({ supplier }: { supplier: SupplierMismatch }) {
   const matchPct = s.match_rate ?? 0;
 
   return (
-    <div className="px-4 py-3 bg-zinc-50 border-t border-[var(--border)] text-xs text-zinc-600 space-y-2">
+    <div className="px-4 py-3 bg-zinc-50 border-t border-border text-xs text-zinc-600 space-y-2">
       <div className="font-medium text-zinc-700 text-sm">Match Summary</div>
 
       <div className="grid grid-cols-3 gap-4">
@@ -159,7 +161,6 @@ function MatchExplanation({ supplier }: { supplier: SupplierMismatch }) {
         </div>
       </div>
 
-      {/* Explanation blocks */}
       <div className="space-y-1.5 pt-1">
         {s.unmatched_stmt > 0 && (
           <div className="flex items-start gap-2 bg-red-50 rounded px-2.5 py-1.5 border border-red-100">
@@ -167,7 +168,6 @@ function MatchExplanation({ supplier }: { supplier: SupplierMismatch }) {
             <span>
               <span className="font-medium text-red-700">items in supplier statement have no matching ERP record.</span>
               {" "}The supplier claims these deliveries but your ERP system has no corresponding receipt.
-              Possible causes: late GRN entry, PO not yet created, or supplier error.
             </span>
           </div>
         )}
@@ -177,8 +177,6 @@ function MatchExplanation({ supplier }: { supplier: SupplierMismatch }) {
             <span>
               <span className="font-medium text-amber-700">ERP records not included in supplier statement.</span>
               {" "}Your ERP shows these receipts but the supplier did not claim them.
-              Possible causes: delivery happened outside the statement period, or supplier oversight.
-              These do not affect the match rate.
             </span>
           </div>
         )}
@@ -188,7 +186,6 @@ function MatchExplanation({ supplier }: { supplier: SupplierMismatch }) {
             <span>
               <span className="font-medium text-orange-700">quantity discrepancies.</span>
               {" "}The PO and part number matched, but quantities differ between ERP and supplier statement.
-              Review to determine which side is correct.
             </span>
           </div>
         )}
@@ -198,7 +195,6 @@ function MatchExplanation({ supplier }: { supplier: SupplierMismatch }) {
             <span>
               <span className="font-medium text-purple-700">price discrepancies.</span>
               {" "}Unit prices differ between ERP and supplier statement for matched items.
-              This may indicate a price change not reflected in the PO.
             </span>
           </div>
         )}
@@ -260,7 +256,7 @@ function ResolveModal({
 
   return (
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-card rounded-2xl shadow-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
         <h3 className="font-semibold text-sm mb-3">
           Resolve {items.length === 1 ? "Item" : `${items.length} Items`}
         </h3>
@@ -271,7 +267,7 @@ function ResolveModal({
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="e.g., Confirmed with supplier — late delivery, will appear next month"
-              className="w-full border border-[var(--border)] rounded px-3 py-2 text-sm h-20 resize-none"
+              className="w-full border border-border rounded-lg px-3 py-2 text-sm h-20 resize-none focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
             />
           </div>
           <div>
@@ -281,21 +277,21 @@ function ResolveModal({
               value={resolvedBy}
               onChange={(e) => setResolvedBy(e.target.value)}
               placeholder="Your name"
-              className="w-full border border-[var(--border)] rounded px-3 py-2 text-sm"
+              className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
             />
           </div>
         </div>
         <div className="flex gap-2 mt-4 justify-end">
           <button
             onClick={onClose}
-            className="px-3 py-1.5 text-xs border border-[var(--border)] rounded hover:bg-zinc-50"
+            className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={handleResolve}
             disabled={!note.trim() || submitting}
-            className="px-3 py-1.5 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+            className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
           >
             {submitting ? "Resolving..." : "Mark as Resolved"}
           </button>
@@ -357,11 +353,11 @@ function SupplierCard({
   }
 
   return (
-    <div className="border border-[var(--border)] rounded-lg overflow-hidden">
+    <div className="bg-card rounded-2xl shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
       {/* Header */}
       <button
         onClick={onToggle}
-        className="w-full px-4 py-3 flex items-center gap-4 bg-[var(--muted)] hover:bg-zinc-100 transition-colors text-left"
+        className="w-full px-4 py-3 flex items-center gap-4 bg-muted hover:bg-zinc-100 transition-colors text-left"
       >
         <svg
           className={`w-4 h-4 text-zinc-400 shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
@@ -400,7 +396,6 @@ function SupplierCard({
           </div>
         </div>
 
-        {/* Breakdown chips */}
         <div className="flex gap-1.5 shrink-0">
           {s.unmatched_stmt > 0 && (
             <span className="px-2 py-0.5 rounded text-xs bg-red-50 text-red-600 border border-red-200">
@@ -431,7 +426,7 @@ function SupplierCard({
           <MatchExplanation supplier={s} />
 
           {/* Filter tabs + bulk actions */}
-          <div className="px-4 py-2 border-t border-[var(--border)] flex items-center justify-between bg-white">
+          <div className="px-4 py-2 border-t border-border flex items-center justify-between bg-card">
             <div className="flex gap-1">
               {([
                 ["all", `All (${s.items.length})`],
@@ -454,9 +449,9 @@ function SupplierCard({
                   <button
                     key={key}
                     onClick={(e) => { e.stopPropagation(); setFilter(key); setSelected(new Set()); }}
-                    className={`px-2.5 py-1 text-xs rounded ${
+                    className={`px-2.5 py-1 text-xs rounded-lg transition-colors ${
                       filter === key
-                        ? "bg-zinc-800 text-white"
+                        ? "bg-accent text-white"
                         : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
                     }`}
                   >
@@ -472,7 +467,7 @@ function SupplierCard({
                     const items = filteredItems.filter((i) => selected.has(i.id));
                     setResolveItems(items);
                   }}
-                  className="px-3 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700"
+                  className="px-3 py-1 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
                 >
                   Resolve {selected.size} selected
                 </button>
@@ -500,7 +495,7 @@ function SupplierCard({
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
-                <tr className="border-t border-b border-[var(--border)] bg-zinc-50 text-zinc-500">
+                <tr className="border-t border-b border-border bg-zinc-50 text-zinc-500">
                   <th className="text-center px-2 py-2 w-8">
                     <input
                       type="checkbox"
@@ -540,7 +535,7 @@ function SupplierCard({
                   return (
                     <tr
                       key={item.id}
-                      className={`border-t border-[var(--border)] hover:bg-zinc-50 ${rowBg}`}
+                      className={`border-t border-border hover:bg-zinc-50 ${rowBg}`}
                     >
                       <td className="text-center px-2 py-2">
                         {!isResolved && (
@@ -608,7 +603,7 @@ function SupplierCard({
                         {!isResolved && (
                           <button
                             onClick={() => setResolveItems([item])}
-                            className="px-2 py-0.5 text-xs text-green-600 hover:text-green-800 hover:bg-green-50 rounded"
+                            className="px-2 py-0.5 text-xs text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
                           >
                             Resolve
                           </button>
@@ -643,6 +638,264 @@ function SupplierCard({
   );
 }
 
+// ── Spreadsheet View helpers ──
+
+const SPREADSHEET_COLUMNS: GridColumn[] = [
+  { key: "flag", label: "Flag", width: 100, editable: true, type: "select", align: "center", options: [
+    { value: "", label: "-" },
+    { value: "flagged", label: "Flagged", color: "#dc2626" },
+    { value: "approved", label: "Approved", color: "#16a34a" },
+    { value: "query", label: "Query", color: "#d97706" },
+  ]},
+  { key: "discrepancy", label: "Issue", width: 130 },
+  { key: "po_number", label: "PO Number", width: 120 },
+  { key: "part_number", label: "Part Number", width: 150 },
+  { key: "erp_qty", label: "ERP Qty", width: 80, editable: true, type: "number", align: "right" },
+  { key: "stmt_qty", label: "Stmt Qty", width: 80, editable: true, type: "number", align: "right" },
+  { key: "qty_delta", label: "Qty Delta", width: 80, align: "right" },
+  { key: "erp_price", label: "ERP Price", width: 90, editable: true, type: "number", align: "right" },
+  { key: "stmt_price", label: "Stmt Price", width: 90, editable: true, type: "number", align: "right" },
+  { key: "price_delta", label: "Price Delta", width: 90, align: "right" },
+  { key: "erp_amount", label: "ERP Amount", width: 100, editable: true, type: "number", align: "right" },
+  { key: "stmt_amount", label: "Stmt Amount", width: 100, editable: true, type: "number", align: "right" },
+  { key: "amt_delta", label: "Amt Delta", width: 100, align: "right" },
+  { key: "status", label: "Status", width: 90, align: "center" },
+  { key: "notes", label: "Notes", width: 200, editable: true, type: "text" },
+];
+
+function supplierToRows(supplier: SupplierMismatch): GridRow[] {
+  return supplier.items.map((item) => ({
+    id: item.id,
+    flag: "",
+    discrepancy: item.discrepancy_type ?? "",
+    po_number: item.erp?.po_number || item.statement?.po_number || "",
+    part_number: item.erp?.material_number || item.statement?.material_number || "",
+    erp_qty: item.erp?.quantity ?? null,
+    stmt_qty: item.statement?.quantity ?? null,
+    qty_delta: item.quantity_delta,
+    erp_price: item.erp?.po_price ?? item.erp?.unit_price ?? null,
+    stmt_price: item.statement?.unit_price ?? null,
+    price_delta: item.price_delta,
+    erp_amount: item.erp?.amount ?? null,
+    stmt_amount: item.statement?.amount ?? null,
+    amt_delta: item.amount_delta,
+    status: item.status,
+    notes: item.resolution_note ?? "",
+  }));
+}
+
+function recomputeDeltas(
+  row: GridRow,
+  edits: Record<string, unknown>
+): Record<string, unknown> {
+  const get = (key: string) => edits[key] ?? row[key];
+  const erpQty = Number(get("erp_qty")) || 0;
+  const stmtQty = Number(get("stmt_qty")) || 0;
+  const erpAmt = Number(get("erp_amount")) || 0;
+  const stmtAmt = Number(get("stmt_amount")) || 0;
+  const erpPrice = Number(get("erp_price")) || 0;
+  const stmtPrice = Number(get("stmt_price")) || 0;
+
+  const out: Record<string, unknown> = {};
+  if (edits["erp_qty"] !== undefined || edits["stmt_qty"] !== undefined) {
+    out["qty_delta"] = stmtQty - erpQty;
+  }
+  if (edits["erp_amount"] !== undefined || edits["stmt_amount"] !== undefined) {
+    out["amt_delta"] = stmtAmt - erpAmt;
+  }
+  if (edits["erp_price"] !== undefined || edits["stmt_price"] !== undefined) {
+    out["price_delta"] = stmtPrice - erpPrice;
+  }
+  return out;
+}
+
+function exportCSV(
+  columns: GridColumn[],
+  rows: GridRow[],
+  edits: Record<string, Record<string, unknown>>,
+  supplierName?: string
+) {
+  const header = columns.map((c) => c.label).join(",");
+  const lines = rows.map((row) => {
+    return columns
+      .map((col) => {
+        const val = edits[row.id]?.[col.key] ?? row[col.key];
+        const str = val == null ? "" : String(val);
+        return str.includes(",") || str.includes('"') || str.includes("\n")
+          ? `"${str.replace(/"/g, '""')}"`
+          : str;
+      })
+      .join(",");
+  });
+  const csv = [header, ...lines].join("\n");
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const slug = supplierName?.replace(/[^a-zA-Z0-9\u4e00-\u9fff]+/g, "-") ?? "all";
+  a.download = `mismatches-${slug}-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function SpreadsheetView({
+  data,
+}: {
+  data: SupplierMismatch[];
+}) {
+  const [selectedSupplierId, setSelectedSupplierId] = useState(data[0]?.supplier_id ?? "");
+  const [editsMap, setEditsMap] = useState<Record<string, Record<string, Record<string, unknown>>>>({});
+
+  const selectedSupplier = data.find((s) => s.supplier_id === selectedSupplierId);
+  const rows = selectedSupplier ? supplierToRows(selectedSupplier) : [];
+  const edits = editsMap[selectedSupplierId] ?? {};
+
+  const editCount = Object.values(edits).reduce(
+    (acc, e) => acc + Object.keys(e).length,
+    0
+  );
+  const totalEdits = Object.values(editsMap).reduce(
+    (acc, supplierEdits) =>
+      acc + Object.values(supplierEdits).reduce((a, e) => a + Object.keys(e).length, 0),
+    0
+  );
+
+  const handleCellChange = useCallback(
+    (rowId: string, colKey: string, value: unknown) => {
+      setEditsMap((prev) => {
+        const supplierEdits = { ...prev[selectedSupplierId] };
+        const rowEdits = { ...supplierEdits[rowId], [colKey]: value };
+        const row = rows.find((r) => r.id === rowId);
+        if (row) {
+          const deltas = recomputeDeltas(row, rowEdits);
+          Object.assign(rowEdits, deltas);
+        }
+        supplierEdits[rowId] = rowEdits;
+        return { ...prev, [selectedSupplierId]: supplierEdits };
+      });
+    },
+    [rows, selectedSupplierId]
+  );
+
+  const matchColor = (rate: number | null) =>
+    rate == null ? "text-zinc-400" : rate >= 90 ? "text-green-600" : rate >= 70 ? "text-amber-600" : "text-red-500";
+
+  return (
+    <div className="space-y-3">
+      {/* Supplier tabs */}
+      <div className="flex gap-2 overflow-x-auto pb-1">
+        {data.map((s) => {
+          const isSelected = s.supplier_id === selectedSupplierId;
+          const hasEdits = Object.keys(editsMap[s.supplier_id] ?? {}).length > 0;
+          return (
+            <button
+              key={s.supplier_id}
+              onClick={() => setSelectedSupplierId(s.supplier_id)}
+              className={`shrink-0 px-3.5 py-2 rounded-lg text-xs font-medium transition-colors border ${
+                isSelected
+                  ? "bg-accent text-white border-accent"
+                  : "bg-card text-zinc-600 border-border hover:bg-muted"
+              }`}
+            >
+              <span>{s.supplier_name}</span>
+              <span className={`ml-2 font-mono ${isSelected ? "text-white/70" : matchColor(s.match_rate)}`}>
+                {s.match_rate != null ? `${s.match_rate.toFixed(0)}%` : "-"}
+              </span>
+              <span className={`ml-1.5 ${isSelected ? "text-white/70" : "text-red-400"}`}>
+                ({s.total_mismatches})
+              </span>
+              {hasEdits && (
+                <span className={`ml-1 w-1.5 h-1.5 rounded-full inline-block ${isSelected ? "bg-white/60" : "bg-accent"}`} />
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Supplier summary */}
+      {selectedSupplier && (
+        <div className="flex items-center gap-4 text-xs text-zinc-500">
+          <span className="font-medium text-zinc-700">{selectedSupplier.supplier_name}</span>
+          <span className="text-zinc-300">|</span>
+          <span>{selectedSupplier.vendor_code}</span>
+          <span className="text-zinc-300">|</span>
+          <span>ERP: <span className="font-mono">{selectedSupplier.total_erp}</span></span>
+          <span>Stmt: <span className="font-mono">{selectedSupplier.total_statement}</span></span>
+          <span className="text-zinc-300">|</span>
+          <span className={matchColor(selectedSupplier.match_rate)}>
+            Match rate: <span className="font-semibold">{selectedSupplier.match_rate?.toFixed(1) ?? "-"}%</span>
+          </span>
+        </div>
+      )}
+
+      {/* Toolbar */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3 text-xs text-zinc-500">
+          <span>{rows.length} rows</span>
+          {editCount > 0 && (
+            <span className="text-accent font-medium">{editCount} edits</span>
+          )}
+          <span className="flex items-center gap-1.5">
+            <span className="w-3 h-3 rounded-sm bg-green-50 border border-green-200" />
+            Edited cells
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="text-accent text-[9px]">*</span>
+            Editable column
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          {totalEdits > 0 && (
+            <button
+              onClick={() => setEditsMap({})}
+              className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted transition-colors text-zinc-600"
+            >
+              Reset all edits
+            </button>
+          )}
+          {editCount > 0 && (
+            <button
+              onClick={() => setEditsMap((prev) => {
+                const next = { ...prev };
+                delete next[selectedSupplierId];
+                return next;
+              })}
+              className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted transition-colors text-zinc-600"
+            >
+              Reset this supplier
+            </button>
+          )}
+          <button
+            onClick={() => exportCSV(
+              SPREADSHEET_COLUMNS,
+              rows,
+              edits,
+              selectedSupplier?.supplier_name
+            )}
+            className="px-3 py-1.5 text-xs bg-accent text-white rounded-lg hover:bg-accent-dark transition-colors flex items-center gap-1.5"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Export CSV
+          </button>
+        </div>
+      </div>
+
+      <SpreadsheetGrid
+        columns={SPREADSHEET_COLUMNS}
+        rows={rows}
+        edits={edits}
+        onCellChange={handleCellChange}
+      />
+    </div>
+  );
+}
+
+// ── Main page ──
+
 export default function MismatchesPage() {
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [orgId, setOrgId] = useState("");
@@ -651,6 +904,7 @@ export default function MismatchesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [viewMode, setViewMode] = useState<ViewMode>("review");
 
   useEffect(() => {
     fetch("/api/v1/orgs")
@@ -705,7 +959,6 @@ export default function MismatchesPage() {
   }
 
   function handleItemsResolved(resolvedIds: string[]) {
-    // Update local state: mark items as resolved
     setData((prev) =>
       prev.map((supplier) => ({
         ...supplier,
@@ -729,7 +982,7 @@ export default function MismatchesPage() {
     <>
       <PageHeader
         title="Mismatches"
-        description="Review discrepancies between ERP records and supplier statements. Each item shows exactly where matching failed and why."
+        description="Review discrepancies between ERP records and supplier statements"
       />
 
       {/* Controls */}
@@ -739,7 +992,7 @@ export default function MismatchesPage() {
           <select
             value={orgId}
             onChange={(e) => setOrgId(e.target.value)}
-            className="border border-[var(--border)] rounded px-3 py-2 text-sm bg-white"
+            className="border border-border rounded-lg px-3 py-2 text-sm bg-card focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
           >
             {orgs.map((o) => (
               <option key={o.id} value={o.id}>{o.name}</option>
@@ -752,9 +1005,48 @@ export default function MismatchesPage() {
             type="text"
             value={period}
             onChange={(e) => setPeriod(e.target.value)}
-            className="border border-[var(--border)] rounded px-3 py-2 text-sm bg-white w-28"
+            className="border border-border rounded-lg px-3 py-2 text-sm bg-card w-28 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
           />
         </div>
+
+        {/* View mode toggle */}
+        {!loading && data.length > 0 && (
+          <div className="ml-auto flex rounded-lg border border-border overflow-hidden">
+            <button
+              onClick={() => setViewMode("review")}
+              className={`px-3 py-2 text-xs font-medium transition-colors flex items-center gap-1.5 ${
+                viewMode === "review"
+                  ? "bg-accent text-white"
+                  : "bg-card text-zinc-600 hover:bg-muted"
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="7" height="7" />
+                <rect x="14" y="3" width="7" height="7" />
+                <rect x="3" y="14" width="7" height="7" />
+                <rect x="14" y="14" width="7" height="7" />
+              </svg>
+              Review
+            </button>
+            <button
+              onClick={() => setViewMode("spreadsheet")}
+              className={`px-3 py-2 text-xs font-medium transition-colors flex items-center gap-1.5 border-l border-border ${
+                viewMode === "spreadsheet"
+                  ? "bg-accent text-white"
+                  : "bg-card text-zinc-600 hover:bg-muted"
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <line x1="3" y1="9" x2="21" y2="9" />
+                <line x1="3" y1="15" x2="21" y2="15" />
+                <line x1="9" y1="3" x2="9" y2="21" />
+                <line x1="15" y1="3" x2="15" y2="21" />
+              </svg>
+              Spreadsheet
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Summary bar */}
@@ -780,20 +1072,22 @@ export default function MismatchesPage() {
               </>
             )}
           </div>
-          <div className="flex gap-2">
-            <button
-              onClick={expandAll}
-              className="px-3 py-1 text-xs border border-[var(--border)] rounded hover:bg-zinc-50"
-            >
-              Expand All
-            </button>
-            <button
-              onClick={collapseAll}
-              className="px-3 py-1 text-xs border border-[var(--border)] rounded hover:bg-zinc-50"
-            >
-              Collapse All
-            </button>
-          </div>
+          {viewMode === "review" && (
+            <div className="flex gap-2">
+              <button
+                onClick={expandAll}
+                className="px-3 py-1 text-xs border border-border rounded-lg hover:bg-muted transition-colors"
+              >
+                Expand All
+              </button>
+              <button
+                onClick={collapseAll}
+                className="px-3 py-1 text-xs border border-border rounded-lg hover:bg-muted transition-colors"
+              >
+                Collapse All
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -801,11 +1095,13 @@ export default function MismatchesPage() {
       {loading ? (
         <div className="text-sm text-zinc-400 py-8 text-center">Loading mismatches...</div>
       ) : error ? (
-        <div className="text-sm text-red-600 bg-red-50 p-3 rounded">{error}</div>
+        <div className="text-sm text-red-600 bg-red-50 p-3 rounded-lg">{error}</div>
       ) : data.length === 0 ? (
-        <div className="text-sm text-zinc-400 py-8 text-center border border-dashed border-[var(--border)] rounded-lg">
+        <div className="text-sm text-zinc-400 py-8 text-center border border-dashed border-border rounded-2xl">
           No mismatches found. Run reconciliation first from the Reconciliation page.
         </div>
+      ) : viewMode === "spreadsheet" ? (
+        <SpreadsheetView data={data} />
       ) : (
         <div className="space-y-3">
           {data.map((supplier) => (
