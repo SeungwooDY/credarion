@@ -37,7 +37,6 @@ interface DuplicateInfo {
   row_count: number;
 }
 
-// Mapping labels for column display
 const FIELD_LABELS: Record<string, string> = {
   po_number: "PO Number",
   material_number: "Material #",
@@ -52,12 +51,10 @@ export default function IngestionPage() {
   const [orgs, setOrgs] = useState<Org[]>([]);
   const [orgId, setOrgId] = useState("");
 
-  // GRN state
   const [grnFile, setGrnFile] = useState<File | null>(null);
   const [grnStatus, setGrnStatus] = useState("");
   const [grnLoading, setGrnLoading] = useState(false);
 
-  // Statement state — step-based flow
   const [stmtFile, setStmtFile] = useState<File | null>(null);
   const [stmtStep, setStmtStep] = useState<"select" | "preview" | "done">("select");
   const [stmtLoading, setStmtLoading] = useState(false);
@@ -65,10 +62,7 @@ export default function IngestionPage() {
   const [stmtResult, setStmtResult] = useState("");
   const [preview, setPreview] = useState<PreviewData | null>(null);
 
-  // Override fields (user can correct auto-detected period)
   const [selectedPeriod, setSelectedPeriod] = useState("");
-
-  // Duplicate warning
   const [duplicateInfo, setDuplicateInfo] = useState<DuplicateInfo | null>(null);
 
   useEffect(() => {
@@ -80,7 +74,6 @@ export default function IngestionPage() {
       })
       .catch(() => {});
   }, []);
-
 
   async function uploadGRN() {
     if (!grnFile || !orgId) return;
@@ -136,7 +129,6 @@ export default function IngestionPage() {
     setGrnLoading(false);
   }
 
-  // Step 1 → Step 2: preview the file
   async function handlePreview() {
     if (!stmtFile || !orgId) return;
     setStmtLoading(true);
@@ -169,7 +161,6 @@ export default function IngestionPage() {
     setStmtLoading(false);
   }
 
-  // Step 2 → confirm upload
   async function handleConfirmUpload(replace = false) {
     const supplierId = preview?.matched_supplier_id;
     if (!stmtFile || !supplierId || !selectedPeriod) return;
@@ -217,7 +208,6 @@ export default function IngestionPage() {
     setDuplicateInfo(null);
   }
 
-  // Reverse the column mapping for display: original_header → canonical_field
   const reverseMapping: Record<string, string> = {};
   if (preview?.column_mapping) {
     for (const [field, header] of Object.entries(preview.column_mapping)) {
@@ -238,7 +228,7 @@ export default function IngestionPage() {
         <select
           value={orgId}
           onChange={(e) => setOrgId(e.target.value)}
-          className="border border-[var(--border)] rounded px-3 py-2 text-sm w-full max-w-sm bg-white"
+          className="border border-border rounded-lg px-3 py-2 text-sm w-full max-w-sm bg-card focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
         >
           <option value="">Select...</option>
           {orgs.map((o) => (
@@ -251,7 +241,7 @@ export default function IngestionPage() {
 
       <div className="grid grid-cols-2 gap-6">
         {/* GRN Upload */}
-        <div className="border border-[var(--border)] rounded-lg p-5">
+        <div className="bg-card rounded-2xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
           <h3 className="font-semibold text-sm mb-1">ERP / GRN Upload</h3>
           <p className="text-xs text-zinc-500 mb-4">
             Upload your SGWERP goods receipt CSV/XLSX. This is your internal
@@ -270,14 +260,14 @@ export default function IngestionPage() {
           <button
             onClick={uploadGRN}
             disabled={!grnFile || !orgId || grnLoading}
-            className="px-4 py-2 bg-[var(--accent)] text-white rounded text-sm disabled:opacity-40"
+            className="px-4 py-2 bg-accent hover:bg-accent-dark text-white rounded-lg text-sm disabled:opacity-40 transition-colors"
           >
             {grnLoading ? "Uploading..." : "Upload GRN"}
           </button>
 
           {grnStatus && (
             <div
-              className={`mt-3 text-xs p-3 rounded font-mono whitespace-pre-wrap ${
+              className={`mt-3 text-xs p-3 rounded-lg font-mono whitespace-pre-wrap ${
                 grnStatus.startsWith("Error")
                   ? "bg-red-50 text-red-700 border border-red-200"
                   : "bg-green-50 text-green-700 border border-green-200"
@@ -288,8 +278,8 @@ export default function IngestionPage() {
           )}
         </div>
 
-        {/* Statement Upload — multi-step */}
-        <div className="border border-[var(--border)] rounded-lg p-5">
+        {/* Statement Upload */}
+        <div className="bg-card rounded-2xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
           <h3 className="font-semibold text-sm mb-1">Supplier Statement</h3>
           <p className="text-xs text-zinc-500 mb-4">
             Upload a reconciliation statement (对账单) received from a supplier.
@@ -313,7 +303,7 @@ export default function IngestionPage() {
               <button
                 onClick={handlePreview}
                 disabled={!stmtFile || !orgId || stmtLoading}
-                className="px-4 py-2 bg-[var(--accent)] text-white rounded text-sm disabled:opacity-40"
+                className="px-4 py-2 bg-accent hover:bg-accent-dark text-white rounded-lg text-sm disabled:opacity-40 transition-colors"
               >
                 {stmtLoading ? "Analyzing file..." : "Analyze File"}
               </button>
@@ -323,13 +313,11 @@ export default function IngestionPage() {
           {/* Step 2: Preview & confirm */}
           {stmtStep === "preview" && preview && (
             <div className="space-y-4">
-              {/* Auto-detected info */}
-              <div className="bg-blue-50 border border-blue-200 rounded p-3 text-xs space-y-2">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs space-y-2">
                 <p className="font-semibold text-blue-800">
                   Auto-detected from file
                 </p>
 
-                {/* Supplier */}
                 <div>
                   <span className="text-blue-600">Supplier: </span>
                   {preview.matched_supplier_name ? (
@@ -346,7 +334,6 @@ export default function IngestionPage() {
                   )}
                 </div>
 
-                {/* Period */}
                 <div>
                   <span className="text-blue-600">Period: </span>
                   {preview.detected_period ? (
@@ -358,7 +345,6 @@ export default function IngestionPage() {
                   )}
                 </div>
 
-                {/* Row count */}
                 <div>
                   <span className="text-blue-600">Data rows: </span>
                   <span className="font-medium text-blue-900">
@@ -366,7 +352,6 @@ export default function IngestionPage() {
                   </span>
                 </div>
 
-                {/* Column mapping status */}
                 <div>
                   <span className="text-blue-600">Column mapping: </span>
                   {preview.column_mapping ? (
@@ -381,9 +366,8 @@ export default function IngestionPage() {
                 </div>
               </div>
 
-              {/* PO overlap warning */}
               {preview.po_overlap?.warning && (
-                <div className="border border-red-300 bg-red-50 rounded p-3 text-xs">
+                <div className="border border-red-300 bg-red-50 rounded-lg p-3 text-xs">
                   <p className="font-semibold text-red-800 mb-1">
                     PO Number Mismatch
                   </p>
@@ -399,9 +383,8 @@ export default function IngestionPage() {
                 </div>
               )}
 
-              {/* Period override (supplier is auto-detected) */}
               {!preview.matched_supplier_id && (
-                <div className="text-xs p-3 border border-red-300 bg-red-50 rounded">
+                <div className="text-xs p-3 border border-red-300 bg-red-50 rounded-lg">
                   <p className="font-semibold text-red-800">
                     Could not match supplier to database
                   </p>
@@ -420,21 +403,20 @@ export default function IngestionPage() {
                   value={selectedPeriod}
                   onChange={(e) => setSelectedPeriod(e.target.value)}
                   placeholder="2026-03"
-                  className="border border-[var(--border)] rounded px-3 py-2 text-sm w-full max-w-[200px] bg-white"
+                  className="border border-border rounded-lg px-3 py-2 text-sm w-full max-w-[200px] bg-card focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
                 />
               </div>
 
-              {/* Data preview table */}
               {preview.preview_rows.length > 0 && (
                 <div>
                   <p className="text-xs font-medium mb-2 text-zinc-600">
                     Preview (first {preview.preview_rows.length} of{" "}
                     {preview.total_data_rows} rows)
                   </p>
-                  <div className="overflow-x-auto border border-[var(--border)] rounded">
+                  <div className="overflow-x-auto bg-card rounded-lg border border-border">
                     <table className="w-full text-xs">
                       <thead>
-                        <tr className="bg-[var(--muted)]">
+                        <tr className="bg-muted">
                           {preview.columns.map((col) => (
                             <th
                               key={col}
@@ -442,7 +424,7 @@ export default function IngestionPage() {
                             >
                               <div>{col}</div>
                               {reverseMapping[col] && (
-                                <div className="font-normal text-blue-500">
+                                <div className="font-normal text-accent">
                                   → {FIELD_LABELS[reverseMapping[col]] || reverseMapping[col]}
                                 </div>
                               )}
@@ -454,7 +436,7 @@ export default function IngestionPage() {
                         {preview.preview_rows.map((row, i) => (
                           <tr
                             key={i}
-                            className="border-t border-[var(--border)]"
+                            className="border-t border-border"
                           >
                             {preview.columns.map((col) => (
                               <td
@@ -472,9 +454,8 @@ export default function IngestionPage() {
                 </div>
               )}
 
-              {/* Duplicate warning */}
               {duplicateInfo && (
-                <div className="text-xs p-3 border border-amber-300 bg-amber-50 rounded">
+                <div className="text-xs p-3 border border-amber-300 bg-amber-50 rounded-lg">
                   <p className="font-semibold text-amber-800 mb-1">
                     Statement already exists
                   </p>
@@ -488,13 +469,13 @@ export default function IngestionPage() {
                     <button
                       onClick={() => handleConfirmUpload(true)}
                       disabled={stmtLoading}
-                      className="px-3 py-1.5 bg-amber-600 text-white rounded text-xs font-medium disabled:opacity-40"
+                      className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-medium disabled:opacity-40 transition-colors"
                     >
                       {stmtLoading ? "Replacing..." : "Replace existing"}
                     </button>
                     <button
                       onClick={() => setDuplicateInfo(null)}
-                      className="px-3 py-1.5 border border-amber-300 text-amber-800 rounded text-xs"
+                      className="px-3 py-1.5 border border-amber-300 text-amber-800 rounded-lg text-xs"
                     >
                       Cancel
                     </button>
@@ -502,7 +483,6 @@ export default function IngestionPage() {
                 </div>
               )}
 
-              {/* Actions */}
               {!duplicateInfo && (
                 <div className="flex gap-2">
                   <button
@@ -510,13 +490,13 @@ export default function IngestionPage() {
                     disabled={
                       !preview?.matched_supplier_id || !selectedPeriod || stmtLoading
                     }
-                    className="px-4 py-2 bg-[var(--accent)] text-white rounded text-sm disabled:opacity-40"
+                    className="px-4 py-2 bg-accent hover:bg-accent-dark text-white rounded-lg text-sm disabled:opacity-40 transition-colors"
                   >
                     {stmtLoading ? "Uploading..." : "Confirm & Upload"}
                   </button>
                   <button
                     onClick={resetStatement}
-                    className="px-4 py-2 border border-[var(--border)] rounded text-sm text-zinc-600"
+                    className="px-4 py-2 border border-border rounded-lg text-sm text-zinc-600 hover:bg-muted transition-colors"
                   >
                     Start over
                   </button>
@@ -528,21 +508,20 @@ export default function IngestionPage() {
           {/* Step 3: Done */}
           {stmtStep === "done" && (
             <div className="space-y-3">
-              <div className="text-xs p-3 bg-green-50 text-green-700 border border-green-200 rounded font-mono">
+              <div className="text-xs p-3 bg-green-50 text-green-700 border border-green-200 rounded-lg font-mono">
                 {stmtResult}
               </div>
               <button
                 onClick={resetStatement}
-                className="px-4 py-2 border border-[var(--border)] rounded text-sm text-zinc-600"
+                className="px-4 py-2 border border-border rounded-lg text-sm text-zinc-600 hover:bg-muted transition-colors"
               >
                 Upload another statement
               </button>
             </div>
           )}
 
-          {/* Error display */}
           {stmtError && (
-            <div className="mt-3 text-xs p-3 bg-red-50 text-red-700 border border-red-200 rounded">
+            <div className="mt-3 text-xs p-3 bg-red-50 text-red-700 border border-red-200 rounded-lg">
               {stmtError}
             </div>
           )}
