@@ -2,63 +2,24 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
+import { useOrgs } from "../lib/swr";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
 }
 
-interface ChatContext {
-  page?: string;
-  supplier?: {
-    name: string;
-    vendor_code: string;
-    match_rate: number | null;
-    total_mismatches: number;
-    unmatched_erp: number;
-    unmatched_stmt: number;
-    qty_issues: number;
-    price_issues: number;
-  };
-  mismatches?: {
-    po_number?: string;
-    part_number?: string;
-    discrepancy_type?: string;
-    quantity_delta?: number | null;
-    price_delta?: number | null;
-    amount_delta?: number | null;
-    status?: string;
-  }[];
-  summary?: Record<string, unknown>;
-}
-
-// Global context store — pages set this to inject context into the chat
-let _globalContext: ChatContext = {};
-const _listeners: Set<() => void> = new Set();
-
-export function setChatContext(ctx: ChatContext) {
-  _globalContext = ctx;
-  _listeners.forEach((fn) => fn());
-}
-
-function useChatContext(): ChatContext {
-  const [ctx, setCtx] = useState(_globalContext);
-  useEffect(() => {
-    const listener = () => setCtx({ ..._globalContext });
-    _listeners.add(listener);
-    return () => { _listeners.delete(listener); };
-  }, []);
-  return ctx;
-}
-
 export default function ChatPanel() {
+  const { orgs } = useOrgs();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const context = useChatContext();
+
+  // Use the first org as default — same as all other pages
+  const orgId = orgs.length > 0 ? orgs[0].id : null;
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -97,7 +58,7 @@ export default function ChatPanel() {
             role: m.role,
             content: m.content,
           })),
-          context: Object.keys(context).length > 0 ? context : undefined,
+          org_id: orgId,
         }),
       });
 
@@ -165,7 +126,7 @@ export default function ChatPanel() {
     }
   }
 
-  const contextLabel = context.supplier?.name || context.page || null;
+  const orgName = orgs.find((o) => o.id === orgId)?.name;
 
   return (
     <>
@@ -189,17 +150,20 @@ export default function ChatPanel() {
       {/* Chat panel */}
       {open && (
         <div className="fixed bottom-6 right-6 w-[400px] h-[560px] rounded-2xl shadow-2xl border border-border flex flex-col z-50 overflow-hidden" style={{ backgroundColor: "#ffffff" }}>
-          {/* Header */}
-          <div className="px-4 py-3 flex items-center justify-between shrink-0 bg-gradient-to-r from-[#7c4dff] via-accent to-accent-dark text-white rounded-t-2xl">
+          {/* Header — click anywhere to minimize */}
+          <div
+            onClick={() => setOpen(false)}
+            className="px-4 py-3 flex items-center justify-between shrink-0 bg-gradient-to-r from-[#7c4dff] via-accent to-accent-dark text-white rounded-t-2xl cursor-pointer select-none"
+          >
             <div className="flex items-center gap-2.5">
               <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center text-xs font-bold">
                 C
               </div>
               <div>
                 <div className="text-sm font-semibold">Credarion Assistant</div>
-                {contextLabel && (
+                {orgName && (
                   <div className="text-[10px] opacity-70 truncate max-w-[200px]">
-                    Context: {contextLabel}
+                    {orgName}
                   </div>
                 )}
               </div>
@@ -207,7 +171,7 @@ export default function ChatPanel() {
             <div className="flex items-center gap-1">
               {messages.length > 0 && (
                 <button
-                  onClick={() => setMessages([])}
+                  onClick={(e) => { e.stopPropagation(); setMessages([]); }}
                   className="p-1.5 rounded-lg hover:bg-white/15 transition-colors"
                   title="Clear chat"
                 >
@@ -217,15 +181,12 @@ export default function ChatPanel() {
                   </svg>
                 </button>
               )}
-              <button
-                onClick={() => setOpen(false)}
-                className="p-1.5 rounded-lg hover:bg-white/15 transition-colors"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
+              {/* Minimize chevron */}
+              <div className="p-1.5 rounded-lg hover:bg-white/15 transition-colors">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="6 9 12 15 18 9" />
                 </svg>
-              </button>
+              </div>
             </div>
           </div>
 
@@ -240,13 +201,13 @@ export default function ChatPanel() {
                 </div>
                 <p className="text-sm font-medium text-zinc-700">Ask me anything</p>
                 <p className="text-xs text-zinc-400 mt-1 max-w-[260px] mx-auto">
-                  I can help you understand mismatches, explain discrepancies, and suggest corrective actions.
+                  I have access to your reconciliation data, invoices, and supplier records.
                 </p>
                 <div className="mt-4 space-y-1.5">
                   {[
-                    "Why are there so many quantity mismatches?",
-                    "Which items should I investigate first?",
-                    "Summarize the issues for this supplier",
+                    "Summarize my reconciliation status",
+                    "Which suppliers have the most mismatches?",
+                    "What's the total amount at risk?",
                   ].map((q) => (
                     <button
                       key={q}
@@ -299,7 +260,7 @@ export default function ChatPanel() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask about mismatches..."
+                placeholder="Ask about your data..."
                 rows={1}
                 className="flex-1 bg-transparent text-sm resize-none outline-none max-h-24 placeholder:text-zinc-400"
                 style={{

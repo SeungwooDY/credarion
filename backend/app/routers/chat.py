@@ -1,22 +1,35 @@
 """
 Context-aware AI chat endpoint.
 
-Accepts a user question plus optional page context (mismatch data,
-reconciliation summaries, etc.) and streams a Claude response.
+Loads live data from the database so the assistant always has context,
+regardless of which page the user is on.
 """
 
 import json
 import logging
+import uuid
+from collections import defaultdict
+from decimal import Decimal
 
 import anthropic
 import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import desc, func
 
 from app.config import settings
 from app.db import SessionLocal
+from app.models import (
+    ERPRecord,
+    Invoice,
+    Organization,
+    ReconciliationResult,
+    ReconciliationRun,
+    StatementLineItem,
+    Supplier,
+    SupplierStatement,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,107 +40,233 @@ You are Credarion Assistant, an AI accounting co-pilot embedded inside Credarion
 a reconciliation and invoice processing platform for Asia-Pacific mid-market companies.
 
 IMPORTANT RULES:
-1. You have access to the user's live data via the <context> block in each message. \
-This is real data from their Credarion instance.
+1. You have access to the user's live database via the <context> block in each message. \
+This is real data queried from their Credarion instance — reference it directly.
 2. ONLY reference data that is actually present in the context. Do NOT assume, \
 fabricate, or guess specific PO numbers, amounts, suppliers, or counts that are \
 not explicitly listed in the context block.
-3. When context has a "supplier" field with mismatch items, analyze those specific items.
-4. When context has only a "summary" (list of suppliers) but NO "supplier" field, \
-the user has NOT selected a specific supplier yet. In this case:
-   - You may reference the summary (supplier names, match rates, mismatch counts)
-   - Do NOT drill into specific PO numbers or line items — you don't have that data
-   - Suggest the user expand a specific supplier to get detailed analysis
-5. If context has no data at all, tell the user to load data first.
-6. Keep responses concise and actionable. Use bullet points for lists.
-7. Do NOT use heading levels (# ## ###) — the chat panel is small. Use **bold** for emphasis.
-8. Use accounting terminology appropriate for APAC mid-market companies.
+3. When the context includes mismatch details for a supplier, analyze those specific items: \
+cite PO numbers, quantities, prices, and amounts.
+4. When the context includes only summary-level data (supplier list, counts), work with that. \
+Do not invent line-item details.
+5. Keep responses concise and actionable. Use bullet points for lists.
+6. Do NOT use heading levels (# ## ###) — the chat panel is small. Use **bold** for emphasis.
+7. Use accounting terminology appropriate for APAC mid-market companies.\
 
 Your capabilities:
 - Analyze mismatches: explain why items failed to match, identify patterns, \
   quantify impact (total amount at risk)
 - Suggest actions: contact supplier, correct ERP entry, approve variance, flag for review
 - Summarize: group issues by type, rank by severity/amount, highlight priorities
-- Explain: reconciliation concepts, match layers, discrepancy types\
+- Explain: reconciliation concepts, match layers, discrepancy types
+- Answer questions about invoices, suppliers, and ERP data\
 """
 
 
 class ChatRequest(BaseModel):
     message: str
     history: list[dict[str, str]] = []
-    context: dict | None = None
+    org_id: str | None = None
 
 
-def _load_live_context(context: dict | None) -> dict | None:
-    """If context has a page but no mismatches, try to load from DB."""
-    if not context or context.get("mismatches"):
-        return context
-
-    # No mismatch data sent from frontend — try loading from DB
-    # This handles the case where the user asks from a non-mismatches page
-    # or the page hadn't loaded data yet
-    return context
+def _decimal(v: Decimal | None) -> float | None:
+    return float(v) if v is not None else None
 
 
-def _build_context_block(context: dict | None) -> str:
+def _load_db_context(org_id: str | None) -> str:
+    """Query the database and build a context string for the LLM."""
     parts: list[str] = []
 
-    if not context:
-        parts.append("No page context available. The user may be on a page without loaded data.")
-        return "\n".join(parts)
+    db = SessionLocal()
+    try:
+        # ── Organizations ──
+        orgs = db.query(Organization).all()
+        if not orgs:
+            parts.append("No organizations in the system yet. The user needs to create one first.")
+            return "\n".join(parts)
 
-    if page := context.get("page"):
-        parts.append(f"Current page: {page}")
+        parts.append(f"Organizations ({len(orgs)}):")
+        for o in orgs:
+            parts.append(f"  - {o.name} (currency: {o.reporting_currency}, id: {o.id})")
 
-    if supplier := context.get("supplier"):
-        parts.append(
-            f"\nSelected supplier: {supplier.get('name', 'Unknown')} "
-            f"(vendor code: {supplier.get('vendor_code', '-')})"
+        # Pick the active org
+        active_org = None
+        if org_id:
+            try:
+                uid = uuid.UUID(org_id)
+                active_org = db.query(Organization).filter(Organization.id == uid).first()
+            except ValueError:
+                pass
+        if not active_org:
+            active_org = orgs[0]
+
+        parts.append(f"\nActive organization: {active_org.name}")
+
+        # ── Suppliers ──
+        suppliers = (
+            db.query(Supplier)
+            .filter(Supplier.org_id == active_org.id)
+            .order_by(Supplier.name)
+            .all()
         )
-        if (rate := supplier.get("match_rate")) is not None:
-            parts.append(f"Match rate: {rate}%")
-        if (total := supplier.get("total_mismatches")) is not None:
-            parts.append(f"Total mismatches: {total}")
-        stats = []
-        for key, label in [
-            ("unmatched_erp", "ERP records not in supplier statement"),
-            ("unmatched_stmt", "Supplier items not found in ERP"),
-            ("qty_issues", "Quantity discrepancies"),
-            ("price_issues", "Price discrepancies"),
-        ]:
-            if (v := supplier.get(key)) and v > 0:
-                stats.append(f"  - {v} {label}")
-        if stats:
-            parts.append("Issue breakdown:\n" + "\n".join(stats))
-    else:
-        parts.append("No supplier selected.")
+        parts.append(f"\nSuppliers ({len(suppliers)}):")
+        for s in suppliers:
+            parts.append(f"  - {s.name} (code: {s.vendor_code})")
 
-    if items := context.get("mismatches"):
-        parts.append(f"\n--- MISMATCH DATA ({len(items)} items) ---")
-        for i, item in enumerate(items[:50]):
-            line_parts = []
-            if po := item.get("po_number"):
-                line_parts.append(f"PO={po}")
-            if pn := item.get("part_number"):
-                line_parts.append(f"Part={pn}")
-            if disc := item.get("discrepancy_type"):
-                line_parts.append(f"Issue={disc}")
-            if (qd := item.get("quantity_delta")) is not None:
-                line_parts.append(f"QtyDelta={qd}")
-            if (pd := item.get("price_delta")) is not None:
-                line_parts.append(f"PriceDelta={pd}")
-            if (ad := item.get("amount_delta")) is not None:
-                line_parts.append(f"AmtDelta={ad}")
-            if status := item.get("status"):
-                line_parts.append(f"Status={status}")
-            parts.append(f"  [{i+1}] " + ", ".join(line_parts))
-        if len(items) > 50:
-            parts.append(f"  ... and {len(items) - 50} more items not shown")
-    else:
-        parts.append("\nNo mismatch items loaded. The user needs to select an organization and period to load data.")
+        # ── ERP record counts ──
+        erp_count = (
+            db.query(func.count(ERPRecord.id))
+            .filter(ERPRecord.org_id == active_org.id)
+            .scalar()
+        )
+        parts.append(f"\nERP records: {erp_count}")
 
-    if summary := context.get("summary"):
-        parts.append(f"\nOverall summary: {json.dumps(summary, default=str)}")
+        # ── Statement counts ──
+        stmt_count = (
+            db.query(func.count(SupplierStatement.id))
+            .join(Supplier, SupplierStatement.supplier_id == Supplier.id)
+            .filter(Supplier.org_id == active_org.id)
+            .scalar()
+        )
+        parts.append(f"Supplier statements uploaded: {stmt_count}")
+
+        # ── Latest reconciliation runs ──
+        latest_runs = (
+            db.query(ReconciliationRun)
+            .join(Supplier, ReconciliationRun.supplier_id == Supplier.id)
+            .filter(
+                Supplier.org_id == active_org.id,
+                ReconciliationRun.status == "completed",
+            )
+            .order_by(desc(ReconciliationRun.started_at))
+            .limit(20)
+            .all()
+        )
+
+        # Deduplicate to latest per supplier
+        seen_suppliers: set[uuid.UUID] = set()
+        unique_runs: list[ReconciliationRun] = []
+        for run in latest_runs:
+            if run.supplier_id not in seen_suppliers:
+                seen_suppliers.add(run.supplier_id)
+                unique_runs.append(run)
+
+        if unique_runs:
+            supplier_map = {s.id: s for s in suppliers}
+            parts.append(f"\n--- RECONCILIATION SUMMARY ({len(unique_runs)} suppliers with completed runs) ---")
+            for run in unique_runs:
+                s = supplier_map.get(run.supplier_id)
+                sname = s.name if s else "Unknown"
+                rate = f"{_decimal(run.auto_match_rate)}%" if run.auto_match_rate is not None else "N/A"
+                parts.append(
+                    f"  {sname} (period: {run.period}): "
+                    f"match rate {rate}, "
+                    f"{run.matched_count} matched, "
+                    f"{run.discrepancy_count} discrepancies, "
+                    f"{run.unmatched_count} unmatched"
+                )
+
+            # ── Top mismatches (discrepancies from latest runs) ──
+            run_ids = [r.id for r in unique_runs]
+            mismatches = (
+                db.query(ReconciliationResult)
+                .filter(
+                    ReconciliationResult.run_id.in_(run_ids),
+                    ReconciliationResult.status.in_(["discrepancy"]),
+                )
+                .limit(60)
+                .all()
+            )
+
+            if mismatches:
+                # Load related ERP + statement records
+                erp_ids = [m.erp_record_id for m in mismatches if m.erp_record_id]
+                stmt_ids = [m.statement_line_id for m in mismatches if m.statement_line_id]
+
+                erp_map: dict[uuid.UUID, ERPRecord] = {}
+                if erp_ids:
+                    for e in db.query(ERPRecord).filter(ERPRecord.id.in_(erp_ids)).all():
+                        erp_map[e.id] = e
+
+                stmt_map: dict[uuid.UUID, StatementLineItem] = {}
+                if stmt_ids:
+                    for sl in db.query(StatementLineItem).filter(StatementLineItem.id.in_(stmt_ids)).all():
+                        stmt_map[sl.id] = sl
+
+                # Group by supplier
+                by_supplier: dict[uuid.UUID, list] = defaultdict(list)
+                for m in mismatches:
+                    by_supplier[m.supplier_id].append(m)
+
+                parts.append(f"\n--- MISMATCH DETAILS ({len(mismatches)} items) ---")
+                for sid, items in by_supplier.items():
+                    s = supplier_map.get(sid)
+                    sname = s.name if s else "Unknown"
+                    parts.append(f"\n  Supplier: {sname} ({len(items)} discrepancies)")
+                    for i, m in enumerate(items[:25]):
+                        line_parts = []
+                        erp = erp_map.get(m.erp_record_id) if m.erp_record_id else None
+                        stmt = stmt_map.get(m.statement_line_id) if m.statement_line_id else None
+
+                        po = (erp.po_number if erp else None) or (stmt.po_number if stmt else None)
+                        part = (erp.material_number if erp else None) or (stmt.material_number if stmt else None)
+
+                        if po:
+                            line_parts.append(f"PO={po}")
+                        if part:
+                            line_parts.append(f"Part={part}")
+                        if m.discrepancy_type:
+                            line_parts.append(f"Issue={m.discrepancy_type}")
+                        if m.quantity_delta is not None:
+                            line_parts.append(f"QtyDelta={_decimal(m.quantity_delta)}")
+                        if m.price_delta is not None:
+                            line_parts.append(f"PriceDelta={_decimal(m.price_delta)}")
+                        if m.amount_delta is not None:
+                            line_parts.append(f"AmtDelta={_decimal(m.amount_delta)}")
+
+                        # Include actual values for context
+                        if erp:
+                            line_parts.append(f"ERP_Qty={_decimal(erp.quantity)}")
+                            line_parts.append(f"ERP_Price={_decimal(erp.po_price)}")
+                        if stmt:
+                            line_parts.append(f"Stmt_Qty={_decimal(stmt.quantity)}")
+                            line_parts.append(f"Stmt_Price={_decimal(stmt.unit_price)}")
+
+                        parts.append(f"    [{i+1}] " + ", ".join(line_parts))
+                    if len(items) > 25:
+                        parts.append(f"    ... and {len(items) - 25} more for this supplier")
+        else:
+            parts.append("\nNo reconciliation runs completed yet.")
+
+        # ── Invoice summary ──
+        try:
+            invoice_stats = (
+                db.query(Invoice.status, func.count(Invoice.id))
+                .filter(Invoice.org_id == active_org.id)
+                .group_by(Invoice.status)
+                .all()
+            )
+            if invoice_stats:
+                total_inv = sum(c for _, c in invoice_stats)
+                parts.append(f"\n--- INVOICES ({total_inv} total) ---")
+                for status, count in invoice_stats:
+                    parts.append(f"  {status}: {count}")
+
+                review_count = (
+                    db.query(func.count(Invoice.id))
+                    .filter(Invoice.org_id == active_org.id, Invoice.needs_review.is_(True))
+                    .scalar()
+                )
+                if review_count:
+                    parts.append(f"  Needs review: {review_count}")
+            else:
+                parts.append("\nNo invoices uploaded yet.")
+        except Exception:
+            db.rollback()
+            parts.append("\nInvoice data not available (table not yet created).")
+
+    finally:
+        db.close()
 
     return "\n".join(parts)
 
@@ -137,14 +276,12 @@ async def chat_ask(req: ChatRequest):
     if not settings.anthropic_api_key:
         raise HTTPException(status_code=503, detail="Anthropic API key not configured")
 
-    context = _load_live_context(req.context)
-    context_block = _build_context_block(context)
+    context_block = _load_db_context(req.org_id)
 
     messages: list[dict] = []
     for msg in req.history[-20:]:
         messages.append({"role": msg["role"], "content": msg["content"]})
 
-    # Always include context so the model knows the data state
     user_content = f"<context>\n{context_block}\n</context>\n\n{req.message}"
     messages.append({"role": "user", "content": user_content})
 

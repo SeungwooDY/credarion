@@ -4,7 +4,6 @@ import { useEffect, useState, useCallback } from "react";
 import PageHeader from "../components/page-header";
 import StatusBadge from "../components/status-badge";
 import SpreadsheetGrid, { type GridColumn, type GridRow } from "../components/spreadsheet-grid";
-import { setChatContext } from "../components/chat-panel";
 import { useOrgs, useMismatches } from "../lib/swr";
 
 interface SideRecord {
@@ -747,33 +746,6 @@ function SpreadsheetView({
   const rows = selectedSupplier ? supplierToRows(selectedSupplier) : [];
   const edits = editsMap[selectedSupplierId] ?? {};
 
-  // Update chat context when selected supplier changes
-  useEffect(() => {
-    if (!selectedSupplier) return;
-    setChatContext({
-      page: "Mismatches (Spreadsheet)",
-      supplier: {
-        name: selectedSupplier.supplier_name,
-        vendor_code: selectedSupplier.vendor_code,
-        match_rate: selectedSupplier.match_rate,
-        total_mismatches: selectedSupplier.total_mismatches,
-        unmatched_erp: selectedSupplier.unmatched_erp,
-        unmatched_stmt: selectedSupplier.unmatched_stmt,
-        qty_issues: selectedSupplier.qty_issues,
-        price_issues: selectedSupplier.price_issues,
-      },
-      mismatches: selectedSupplier.items.map((item) => ({
-        po_number: item.erp?.po_number || item.statement?.po_number || undefined,
-        part_number: item.erp?.material_number || item.statement?.material_number || undefined,
-        discrepancy_type: item.discrepancy_type || undefined,
-        quantity_delta: item.quantity_delta,
-        price_delta: item.price_delta,
-        amount_delta: item.amount_delta,
-        status: item.status,
-      })),
-    });
-  }, [selectedSupplier]);
-
   const editCount = Object.values(edits).reduce(
     (acc, e) => acc + Object.keys(e).length,
     0
@@ -933,57 +905,6 @@ export default function MismatchesPage() {
     if (orgs.length > 0 && !orgId) setOrgId(orgs[0].id);
   }, [orgs, orgId]);
 
-  // Inject context into the chat panel whenever data changes
-  useEffect(() => {
-    if (data.length === 0) {
-      setChatContext({ page: "Mismatches" });
-      return;
-    }
-
-    // Only send detailed mismatch items if user has expanded a specific supplier
-    const expandedIds = Array.from(expanded);
-    const activeSupplier = expandedIds.length === 1
-      ? data.find((d) => d.supplier_id === expandedIds[0])
-      : null;
-
-    const ctx: Parameters<typeof setChatContext>[0] = {
-      page: "Mismatches",
-      summary: {
-        total_suppliers: data.length,
-        total_mismatches: data.reduce((a, d) => a + d.total_mismatches, 0),
-        suppliers: data.map((s) => ({
-          name: s.supplier_name,
-          match_rate: s.match_rate,
-          mismatches: s.total_mismatches,
-        })),
-      },
-    };
-
-    if (activeSupplier) {
-      ctx.supplier = {
-        name: activeSupplier.supplier_name,
-        vendor_code: activeSupplier.vendor_code,
-        match_rate: activeSupplier.match_rate,
-        total_mismatches: activeSupplier.total_mismatches,
-        unmatched_erp: activeSupplier.unmatched_erp,
-        unmatched_stmt: activeSupplier.unmatched_stmt,
-        qty_issues: activeSupplier.qty_issues,
-        price_issues: activeSupplier.price_issues,
-      };
-      ctx.mismatches = activeSupplier.items.map((item) => ({
-        po_number: item.erp?.po_number || item.statement?.po_number || undefined,
-        part_number: item.erp?.material_number || item.statement?.material_number || undefined,
-        discrepancy_type: item.discrepancy_type || undefined,
-        quantity_delta: item.quantity_delta,
-        price_delta: item.price_delta,
-        amount_delta: item.amount_delta,
-        status: item.status,
-      }));
-    }
-
-    setChatContext(ctx);
-    return () => setChatContext({});
-  }, [data, expanded]);
 
   function toggleExpand(supplierId: string) {
     setExpanded((prev) => {
