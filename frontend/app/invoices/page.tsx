@@ -3,20 +3,7 @@
 import { useEffect, useState } from "react";
 import PageHeader from "../components/page-header";
 import StatusBadge from "../components/status-badge";
-import { useOrgs } from "../components/data-provider";
-
-interface InvoiceListItem {
-  id: string;
-  invoice_number: string | null;
-  invoice_date: string | null;
-  total_amount: number | null;
-  currency: string;
-  status: string;
-  supplier_name_extracted: string | null;
-  needs_review: boolean;
-  extraction_confidence: number | null;
-  created_at: string;
-}
+import { useOrgs, useInvoices } from "../lib/swr";
 
 interface InvoiceDetail {
   id: string;
@@ -47,9 +34,9 @@ interface InvoiceDetail {
 export default function InvoicesPage() {
   const { orgs } = useOrgs();
   const [orgId, setOrgId] = useState("");
-  const [invoices, setInvoices] = useState<InvoiceListItem[]>([]);
   const [statusFilter, setStatusFilter] = useState("");
   const [reviewFilter, setReviewFilter] = useState("");
+  const { invoices, refreshInvoices } = useInvoices(orgId, statusFilter, reviewFilter);
   const [selected, setSelected] = useState<InvoiceDetail | null>(null);
 
   // Upload state
@@ -62,23 +49,6 @@ export default function InvoicesPage() {
     if (orgs.length > 0 && !orgId) setOrgId(orgs[0].id);
   }, [orgs, orgId]);
 
-  useEffect(() => {
-    if (orgId) loadInvoices();
-  }, [orgId, statusFilter, reviewFilter]);
-
-  async function loadInvoices() {
-    if (!orgId) return;
-    let url = `/api/v1/invoices/?org_id=${orgId}&limit=100`;
-    if (statusFilter) url += `&status=${statusFilter}`;
-    if (reviewFilter) url += `&needs_review=${reviewFilter}`;
-
-    try {
-      const res = await fetch(url);
-      if (res.ok) setInvoices(await res.json());
-    } catch {
-      /* ignore */
-    }
-  }
 
   async function handleUpload() {
     if (!files || !orgId) return;
@@ -98,7 +68,7 @@ export default function InvoicesPage() {
       const data = await res.json();
       if (res.ok) {
         setUploadMsg(`Uploaded ${data.invoices.length} invoice(s)`);
-        loadInvoices();
+        refreshInvoices();
       } else {
         setUploadMsg(`Error: ${data.detail || JSON.stringify(data)}`);
       }
@@ -115,7 +85,7 @@ export default function InvoicesPage() {
         method: "POST",
       });
       if (res.ok) {
-        loadInvoices();
+        refreshInvoices();
         // Open detail
         const detail = await res.json();
         setSelected(detail);
@@ -148,7 +118,7 @@ export default function InvoicesPage() {
       if (res.ok) {
         const updated = await res.json();
         setSelected(updated);
-        loadInvoices();
+        refreshInvoices();
       } else {
         const err = await res.json();
         alert(err.detail || "Failed");

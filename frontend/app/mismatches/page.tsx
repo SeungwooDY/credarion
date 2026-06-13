@@ -5,12 +5,7 @@ import PageHeader from "../components/page-header";
 import StatusBadge from "../components/status-badge";
 import SpreadsheetGrid, { type GridColumn, type GridRow } from "../components/spreadsheet-grid";
 import { setChatContext } from "../components/chat-panel";
-import { useOrgs } from "../components/data-provider";
-
-interface Org {
-  id: string;
-  name: string;
-}
+import { useOrgs, useMismatches } from "../lib/swr";
 
 interface SideRecord {
   po_number: string | null;
@@ -929,9 +924,8 @@ export default function MismatchesPage() {
   const { orgs } = useOrgs();
   const [orgId, setOrgId] = useState("");
   const [period, setPeriod] = useState("2026-03");
-  const [data, setData] = useState<SupplierMismatch[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const { data, mismatchesLoading: loading, mismatchesError, refreshMismatches } = useMismatches(orgId, period);
+  const error = mismatchesError?.message ?? "";
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<ViewMode>("review");
 
@@ -939,60 +933,21 @@ export default function MismatchesPage() {
     if (orgs.length > 0 && !orgId) setOrgId(orgs[0].id);
   }, [orgs, orgId]);
 
-  function loadData() {
-    if (!orgId || !period) return;
-    setLoading(true);
-    setError("");
-    fetch(`/api/v1/reconciliation/mismatches?org_id=${orgId}&period=${period}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(`Error ${r.status}`);
-        return r.json();
-      })
-      .then((d) => {
-        setData(d);
-        setLoading(false);
-      })
-      .catch((e) => {
-        setError(e.message);
-        setData([]);
-        setLoading(false);
-      });
-  }
-
-  useEffect(() => {
-    loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgId, period]);
-
   // Inject context into the chat panel whenever data changes
   useEffect(() => {
     if (data.length === 0) {
       setChatContext({ page: "Mismatches" });
       return;
     }
-    // Send all suppliers' summary + first supplier's items as context
-    const firstSupplier = data[0];
-    setChatContext({
+
+    // Only send detailed mismatch items if user has expanded a specific supplier
+    const expandedIds = Array.from(expanded);
+    const activeSupplier = expandedIds.length === 1
+      ? data.find((d) => d.supplier_id === expandedIds[0])
+      : null;
+
+    const ctx: Parameters<typeof setChatContext>[0] = {
       page: "Mismatches",
-      supplier: {
-        name: firstSupplier.supplier_name,
-        vendor_code: firstSupplier.vendor_code,
-        match_rate: firstSupplier.match_rate,
-        total_mismatches: firstSupplier.total_mismatches,
-        unmatched_erp: firstSupplier.unmatched_erp,
-        unmatched_stmt: firstSupplier.unmatched_stmt,
-        qty_issues: firstSupplier.qty_issues,
-        price_issues: firstSupplier.price_issues,
-      },
-      mismatches: firstSupplier.items.map((item) => ({
-        po_number: item.erp?.po_number || item.statement?.po_number || undefined,
-        part_number: item.erp?.material_number || item.statement?.material_number || undefined,
-        discrepancy_type: item.discrepancy_type || undefined,
-        quantity_delta: item.quantity_delta,
-        price_delta: item.price_delta,
-        amount_delta: item.amount_delta,
-        status: item.status,
-      })),
       summary: {
         total_suppliers: data.length,
         total_mismatches: data.reduce((a, d) => a + d.total_mismatches, 0),
@@ -1002,9 +957,33 @@ export default function MismatchesPage() {
           mismatches: s.total_mismatches,
         })),
       },
-    });
+    };
+
+    if (activeSupplier) {
+      ctx.supplier = {
+        name: activeSupplier.supplier_name,
+        vendor_code: activeSupplier.vendor_code,
+        match_rate: activeSupplier.match_rate,
+        total_mismatches: activeSupplier.total_mismatches,
+        unmatched_erp: activeSupplier.unmatched_erp,
+        unmatched_stmt: activeSupplier.unmatched_stmt,
+        qty_issues: activeSupplier.qty_issues,
+        price_issues: activeSupplier.price_issues,
+      };
+      ctx.mismatches = activeSupplier.items.map((item) => ({
+        po_number: item.erp?.po_number || item.statement?.po_number || undefined,
+        part_number: item.erp?.material_number || item.statement?.material_number || undefined,
+        discrepancy_type: item.discrepancy_type || undefined,
+        quantity_delta: item.quantity_delta,
+        price_delta: item.price_delta,
+        amount_delta: item.amount_delta,
+        status: item.status,
+      }));
+    }
+
+    setChatContext(ctx);
     return () => setChatContext({});
-  }, [data]);
+  }, [data, expanded]);
 
   function toggleExpand(supplierId: string) {
     setExpanded((prev) => {
@@ -1024,16 +1003,7 @@ export default function MismatchesPage() {
   }
 
   function handleItemsResolved(resolvedIds: string[]) {
-    setData((prev) =>
-      prev.map((supplier) => ({
-        ...supplier,
-        items: supplier.items.map((item) =>
-          resolvedIds.includes(item.id)
-            ? { ...item, status: "resolved" }
-            : item
-        ),
-      }))
-    );
+    refreshMismatches();
   }
 
   const totalMismatches = data.reduce((acc, d) => acc + d.total_mismatches, 0);

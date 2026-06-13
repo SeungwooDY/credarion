@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import PageHeader from "./components/page-header";
-import { useOrgs } from "./components/data-provider";
+import { useOrgs } from "./lib/swr";
 
 function ProgressRing({ percent, size = 80 }: { percent: number; size?: number }) {
   const strokeWidth = 6;

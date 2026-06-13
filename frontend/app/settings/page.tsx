@@ -2,10 +2,9 @@
 
 import { useEffect, useState } from "react";
 import PageHeader from "../components/page-header";
-import { useOrgs } from "../components/data-provider";
+import { useOrgs, useReconConfig } from "../lib/swr";
 
-interface ReconConfig {
-  org_id: string;
+interface ReconConfigForm {
   qty_tolerance_pct: number;
   price_tolerance_pct: number;
   auto_resolve_exact: boolean;
@@ -18,20 +17,28 @@ export default function SettingsPage() {
   const [orgId, setOrgId] = useState("");
   const [newOrgName, setNewOrgName] = useState("");
   const [orgMsg, setOrgMsg] = useState("");
-  const [config, setConfig] = useState<ReconConfig | null>(null);
+  const { config, refreshConfig } = useReconConfig(orgId);
+  const [formConfig, setFormConfig] = useState<ReconConfigForm | null>(null);
   const [configMsg, setConfigMsg] = useState("");
 
   useEffect(() => {
     if (orgs.length > 0 && !orgId) setOrgId(orgs[0].id);
   }, [orgs, orgId]);
 
+  // Sync SWR config into local form state
   useEffect(() => {
-    if (!orgId) return;
-    fetch(`/api/v1/reconciliation/config?org_id=${orgId}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => setConfig(data))
-      .catch(() => setConfig(null));
-  }, [orgId]);
+    if (config) {
+      setFormConfig({
+        qty_tolerance_pct: config.qty_tolerance_pct,
+        price_tolerance_pct: config.price_tolerance_pct,
+        auto_resolve_exact: config.auto_resolve_exact,
+        ai_layer_enabled: config.ai_layer_enabled,
+        ai_max_tokens_per_run: config.ai_max_tokens_per_run,
+      });
+    } else {
+      setFormConfig(null);
+    }
+  }, [config]);
 
   async function createOrg() {
     if (!newOrgName.trim()) return;
@@ -56,21 +63,16 @@ export default function SettingsPage() {
   }
 
   async function saveConfig() {
-    if (!config || !orgId) return;
+    if (!formConfig || !orgId) return;
     try {
       const res = await fetch(`/api/v1/reconciliation/config?org_id=${orgId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          qty_tolerance_pct: config.qty_tolerance_pct,
-          price_tolerance_pct: config.price_tolerance_pct,
-          auto_resolve_exact: config.auto_resolve_exact,
-          ai_layer_enabled: config.ai_layer_enabled,
-          ai_max_tokens_per_run: config.ai_max_tokens_per_run,
-        }),
+        body: JSON.stringify(formConfig),
       });
       if (res.ok) {
         setConfigMsg("Saved");
+        refreshConfig();
         setTimeout(() => setConfigMsg(""), 2000);
       } else {
         const err = await res.json();
@@ -148,7 +150,7 @@ export default function SettingsPage() {
             Reconciliation Config
           </h3>
 
-          {config ? (
+          {formConfig ? (
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-medium mb-1">
@@ -157,10 +159,10 @@ export default function SettingsPage() {
                 <input
                   type="number"
                   step="0.01"
-                  value={config.qty_tolerance_pct}
+                  value={formConfig.qty_tolerance_pct}
                   onChange={(e) =>
-                    setConfig({
-                      ...config,
+                    setFormConfig({
+                      ...formConfig,
                       qty_tolerance_pct: parseFloat(e.target.value),
                     })
                   }
@@ -174,10 +176,10 @@ export default function SettingsPage() {
                 <input
                   type="number"
                   step="0.01"
-                  value={config.price_tolerance_pct}
+                  value={formConfig.price_tolerance_pct}
                   onChange={(e) =>
-                    setConfig({
-                      ...config,
+                    setFormConfig({
+                      ...formConfig,
                       price_tolerance_pct: parseFloat(e.target.value),
                     })
                   }
@@ -187,10 +189,10 @@ export default function SettingsPage() {
               <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
-                  checked={config.auto_resolve_exact}
+                  checked={formConfig.auto_resolve_exact}
                   onChange={(e) =>
-                    setConfig({
-                      ...config,
+                    setFormConfig({
+                      ...formConfig,
                       auto_resolve_exact: e.target.checked,
                     })
                   }
@@ -200,10 +202,10 @@ export default function SettingsPage() {
               <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
-                  checked={config.ai_layer_enabled}
+                  checked={formConfig.ai_layer_enabled}
                   onChange={(e) =>
-                    setConfig({
-                      ...config,
+                    setFormConfig({
+                      ...formConfig,
                       ai_layer_enabled: e.target.checked,
                     })
                   }
@@ -216,10 +218,10 @@ export default function SettingsPage() {
                 </label>
                 <input
                   type="number"
-                  value={config.ai_max_tokens_per_run}
+                  value={formConfig.ai_max_tokens_per_run}
                   onChange={(e) =>
-                    setConfig({
-                      ...config,
+                    setFormConfig({
+                      ...formConfig,
                       ai_max_tokens_per_run: parseInt(e.target.value),
                     })
                   }

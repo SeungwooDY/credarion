@@ -2,12 +2,7 @@
 
 import { useEffect, useState } from "react";
 import PageHeader from "../components/page-header";
-import { useOrgs } from "../components/data-provider";
-
-interface Org {
-  id: string;
-  name: string;
-}
+import { useOrgs } from "../lib/swr";
 
 interface POOverlapInfo {
   file_po_count: number;

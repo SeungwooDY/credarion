@@ -1,27 +1,9 @@
 "use client";
 
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef } from "react";
 import PageHeader from "../components/page-header";
 import StatusBadge from "../components/status-badge";
-import { useOrgs } from "../components/data-provider";
-
-interface Org {
-  id: string;
-  name: string;
-}
-
-interface SupplierReady {
-  id: string;
-  name: string;
-  vendor_code: string;
-  erp_count: number;
-  statement_rows: number;
-  has_erp: boolean;
-  has_statement: boolean;
-  ready: boolean;
-  last_match_rate: number | null;
-  last_run_status: string | null;
-}
+import { useOrgs, useSuppliers } from "../lib/swr";
 
 interface RunResult {
   run: {
@@ -118,8 +100,7 @@ export default function ReconciliationPage() {
   const { orgs } = useOrgs();
   const [orgId, setOrgId] = useState("");
   const [period, setPeriod] = useState("2026-03");
-  const [suppliers, setSuppliers] = useState<SupplierReady[]>([]);
-  const [suppliersLoading, setSuppliersLoading] = useState(false);
+  const { suppliers, suppliersLoading, refreshSuppliers } = useSuppliers(orgId, period);
 
   const [supplierId, setSupplierId] = useState("");
   const [loading, setLoading] = useState(false);
@@ -130,27 +111,6 @@ export default function ReconciliationPage() {
   useEffect(() => {
     if (orgs.length > 0 && !orgId) setOrgId(orgs[0].id);
   }, [orgs, orgId]);
-
-  const loadSuppliers = useCallback(() => {
-    if (!orgId || !period) return;
-    setSuppliersLoading(true);
-    fetch(
-      `/api/v1/reconciliation/suppliers-ready?org_id=${orgId}&period=${period}`
-    )
-      .then((r) => r.json())
-      .then((data) => {
-        setSuppliers(data);
-        setSuppliersLoading(false);
-      })
-      .catch(() => {
-        setSuppliers([]);
-        setSuppliersLoading(false);
-      });
-  }, [orgId, period]);
-
-  useEffect(() => {
-    loadSuppliers();
-  }, [loadSuppliers]);
 
   async function runReconciliation(sid?: string) {
     const targetId = sid || supplierId;
@@ -182,7 +142,7 @@ export default function ReconciliationPage() {
         setResults(await resResults.json());
       }
 
-      loadSuppliers();
+      refreshSuppliers();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }

@@ -1,54 +1,16 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, useCallback, type ReactNode } from "react";
+import { type ReactNode } from "react";
+import { SWRConfig } from "swr";
+import { swrDefaults } from "../lib/swr";
 
-interface Org {
-  id: string;
-  name: string;
-  reporting_currency: string;
-}
-
-interface DataContextValue {
-  orgs: Org[];
-  orgsLoading: boolean;
-  refreshOrgs: () => void;
-}
-
-const DataContext = createContext<DataContextValue>({
-  orgs: [],
-  orgsLoading: true,
-  refreshOrgs: () => {},
-});
-
-export function useOrgs() {
-  return useContext(DataContext);
-}
+// Re-export useOrgs so existing imports keep working
+export { useOrgs } from "../lib/swr";
 
 export default function DataProvider({ children }: { children: ReactNode }) {
-  const [orgs, setOrgs] = useState<Org[]>([]);
-  const [orgsLoading, setOrgsLoading] = useState(true);
-
-  const refreshOrgs = useCallback(() => {
-    setOrgsLoading(true);
-    fetch("/api/v1/orgs")
-      .then((r) => r.json())
-      .then((data) => {
-        setOrgs(data);
-        setOrgsLoading(false);
-      })
-      .catch(() => {
-        setOrgs([]);
-        setOrgsLoading(false);
-      });
-  }, []);
-
-  useEffect(() => {
-    refreshOrgs();
-  }, [refreshOrgs]);
-
   return (
-    <DataContext value={{ orgs, orgsLoading, refreshOrgs }}>
+    <SWRConfig value={swrDefaults}>
       {children}
-    </DataContext>
+    </SWRConfig>
   );
 }
