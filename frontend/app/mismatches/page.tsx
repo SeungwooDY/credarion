@@ -5,6 +5,7 @@ import PageHeader from "../components/page-header";
 import StatusBadge from "../components/status-badge";
 import SpreadsheetGrid, { type GridColumn, type GridRow } from "../components/spreadsheet-grid";
 import { useOrgs, useMismatches } from "../lib/swr";
+import { RippleButton } from "@/components/ui/multi-type-ripple-buttons";
 
 interface SideRecord {
   po_number: string | null;
@@ -284,13 +285,18 @@ function ResolveModal({
           >
             Cancel
           </button>
-          <button
+          <RippleButton
+            variant="hover"
+            hoverRippleColor="#16A34A"
             onClick={handleResolve}
             disabled={!note.trim() || submitting}
-            className="px-3 py-1.5 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors"
+            className="!px-3 !py-1.5 !text-xs !rounded-lg text-green-700 font-medium"
           >
-            {submitting ? "Resolving..." : "Mark as Resolved"}
-          </button>
+            <span className="flex items-center gap-1.5">
+              <span aria-hidden>✓</span>
+              {submitting ? "Resolving..." : "Mark as Resolved"}
+            </span>
+          </RippleButton>
         </div>
       </div>
     </div>

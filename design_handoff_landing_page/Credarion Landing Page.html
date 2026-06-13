@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Credarion — Supplier reconciliation, resolved</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="credarion/theme.css" />
+<link rel="stylesheet" href="credarion/sections.css" />
+</head>
+<body>
+
+<!-- ============ NAV ============ -->
+<header class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top" aria-label="Credarion home">
+      <svg class="mark" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+        <rect x="0.5" y="0.5" width="21" height="21" stroke="#0A0A0A"/>
+        <line x1="4" y1="7"  x2="11" y2="7"  stroke="#8B897F" stroke-width="1.4"/>
+        <line x1="6" y1="11" x2="11" y2="11" stroke="#8B897F" stroke-width="1.4"/>
+        <line x1="11" y1="9" x2="18" y2="9" stroke="#15734A" stroke-width="1.6"/>
+        <path d="M14.5 9 L11 12.5 L9 10.5" stroke="#15734A" stroke-width="1.6" fill="none" stroke-linecap="square"/>
+      </svg>
+      <span class="word">Credarion</span>
+    </a>
+    <nav class="nav-links">
+      <a href="#mess">The problem</a>
+      <a href="#engine">The engine</a>
+      <a href="#result">Results</a>
+      <a href="#pricing">Pricing</a>
+    </nav>
+    <div class="nav-right">
+      <span class="nav-status"><span class="dot dot-green"></span>97.3% reconciled</span>
+      <a href="#demo" class="btn btn-ink">Book a demo</a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+
+<!-- ============ HERO ============ -->
+<section class="hero">
+  <div class="ledger-bg" aria-hidden="true"></div>
+  <div class="wrap">
+    <div class="hero-grid">
+      <div>
+        <span class="eyebrow reveal">AI Accounting Co-pilot · Asia-Pacific</span>
+        <h1 class="display reveal d1">Supplier reconciliation,<br/>resolved by morning.</h1>
+        <p class="lede reveal d2">Credarion ingests messy ERP goods receipts and supplier statements in any format, matches every line, and flags only what truly doesn't — so seven days of spreadsheet work close in one.</p>
+        <div class="hero-cta reveal d3">
+          <a href="#demo" class="btn btn-ink">Book a demo <span class="arrow">→</span></a>
+          <a href="#engine" class="btn btn-ghost">See the engine</a>
+        </div>
+        <div class="hero-note reveal d4">
+          <span><span class="dot dot-green"></span>Exact · Fuzzy · Multi-PO · AI</span>
+          <span><span class="dot dot-amber"></span>Audit-ready trail</span>
+          <span>Kingdee · Yonyou · Xero · SAP</span>
+        </div>
+      </div>
+
+      <!-- readout panel -->
+      <aside class="readout reveal d2" aria-label="Reconciliation readout">
+        <div class="readout-head">
+          <span class="cap">Auto-match rate</span>
+          <span class="cap" style="color:var(--ink-mute)">Live · monthly close</span>
+        </div>
+        <div class="rate-block">
+          <div class="rate-num"><span class="ticker" data-to="97.3" data-dec="1">97.3</span><span class="pct">%</span></div>
+          <div class="rate-bar"><i data-fill="97.3"></i></div>
+        </div>
+        <div class="beforeafter">
+          <div class="ba-cell">
+            <div class="k">Manual close</div>
+            <div class="v"><span class="ticker" data-to="7.0" data-dec="1">7.0</span>d</div>
+          </div>
+          <div class="ba-arrow">→</div>
+          <div class="ba-cell after">
+            <div class="k">With Credarion</div>
+            <div class="v"><span class="ticker" data-to="1.5" data-dec="1">1.5</span>d</div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- ============ THE MESS ============ -->
+<section class="section rule-top" id="mess">
+  <div class="wrap">
+    <div style="max-width:760px">
+      <span class="eyebrow reveal"><span class="idx">01</span>&nbsp;The mess</span>
+      <h2 class="h-sec reveal d1" style="margin-top:20px">Five suppliers. Five formats. One version of the truth that doesn't exist yet.</h2>
+      <p class="lede reveal d2" style="margin-top:18px">Every statement arrives in its own shape — different headers, different column names for the same field, a PO stored as a float in one system and a string in another. This is the complexity Credarion eats for breakfast.</p>
+    </div>
+
+    <div class="mess-grid">
+      <!-- fan of statements -->
+      <div class="fan reveal d2" id="fan">
+        <!-- cards positioned by JS -->
+        <div class="stmt" data-rot="-13" data-x="0"  data-y="40" data-z="1">
+          <div class="stmt-h"><span class="nm">Shenzhen Ruiyang Plastics</span><span class="fmt">xlsx</span></div>
+          <table><thead><tr><th>采购订单</th><th>物料</th><th class="r">数量</th></tr></thead>
+          <tbody>
+            <tr><td>PO-428759</td><td>RY-08831</td><td class="r">1,200</td></tr>
+            <tr><td>PO-428760</td><td>RY-08842</td><td class="r">640</td></tr>
+            <tr><td>PO-428771</td><td>RY-09001</td><td class="r">2,000</td></tr>
+          </tbody></table>
+        </div>
+        <div class="stmt" data-rot="-6" data-x="36" data-y="18" data-z="2">
+          <div class="stmt-h"><span class="nm">Acme Components (HK)</span><span class="fmt">csv</span></div>
+          <table><thead><tr><th>Order Ref</th><th class="r">Qty</th><th class="r">Unit £</th></tr></thead>
+          <tbody>
+            <tr><td>428759.0</td><td class="r">1200</td><td class="r">3.4200</td></tr>
+            <tr><td>428762.0</td><td class="r">300</td><td class="r">9.1000</td></tr>
+            <tr><td>428765.0</td><td class="r">75</td><td class="r">21.500</td></tr>
+          </tbody></table>
+        </div>
+        <div class="stmt" data-rot="1" data-x="74" data-y="2" data-z="3">
+          <div class="stmt-h"><span class="nm">Tan Seng Metals Pte</span><span class="fmt">pdf</span></div>
+          <table><thead><tr><th>P/O #</th><th>Part</th><th class="r">Amount</th></tr></thead>
+          <tbody>
+            <tr><td>PO428759</td><td>TS/441</td><td class="r">4,104.00</td></tr>
+            <tr><td>PO428780</td><td>TS/562</td><td class="r">1,890.00</td></tr>
+            <tr><td>PO428781</td><td>TS/563</td><td class="r">512.40</td></tr>
+          </tbody></table>
+        </div>
+        <div class="stmt" data-rot="8" data-x="112" data-y="20" data-z="4">
+          <div class="stmt-h"><span class="nm">Yongtai Industrial 永泰</span><span class="fmt">xls</span></div>
+          <table><thead><tr><th>Purchase Order</th><th class="r">Recd</th></tr></thead>
+          <tbody>
+            <tr><td>4 28759</td><td class="r">1.20k</td></tr>
+            <tr><td>4 28790</td><td class="r">0.95k</td></tr>
+            <tr class="flag-cell"><td>— blank —</td><td class="r">0.40k</td></tr>
+          </tbody></table>
+        </div>
+        <div class="stmt" data-rot="15" data-x="150" data-y="46" data-z="5">
+          <div class="stmt-h"><span class="nm">Bangkok Polymer Co.</span><span class="fmt">scan</span></div>
+          <table><thead><tr><th>เลขที่ PO</th><th class="r">จำนวน</th></tr></thead>
+          <tbody>
+            <tr><td>PO 428759</td><td class="r">1,200</td></tr>
+            <tr><td>PO 428803</td><td class="r">3,300</td></tr>
+            <tr><td>PO 428804</td><td class="r">180</td></tr>
+          </tbody></table>
+        </div>
+      </div>
+
+      <!-- friction list -->
+      <div class="friction-list reveal d3">
+        <div class="friction">
+          <span class="fi">·01</span>
+          <div><div class="ft">The same PO, five ways</div>
+          <div class="fd"><code>428759.0</code><span class="x">vs</span><code>PO428759</code><span class="x">vs</span><code>4 28759</code></div></div>
+        </div>
+        <div class="friction">
+          <span class="fi">·02</span>
+          <div><div class="ft">Trailing-float corruption</div>
+          <div class="fd">Excel silently turns a reference into a number — <code>428759.0</code> will never equal <code>428759</code>.</div></div>
+        </div>
+        <div class="friction">
+          <span class="fi">·03</span>
+          <div><div class="ft">Headers in three languages</div>
+          <div class="fd"><code>采购订单</code><span class="x">·</span><code>Order Ref</code><span class="x">·</span><code>เลขที่ PO</code> — all the same field.</div></div>
+        </div>
+        <div class="friction">
+          <span class="fi">·04</span>
+          <div><div class="ft">Currency &amp; unit drift</div>
+          <div class="fd"><code>¥</code><span class="x">·</span><code>£</code><span class="x">·</span><code>RMB</code>, quantities in <code>1.20k</code> vs <code>1,200</code>.</div></div>
+        </div>
+        <div class="friction">
+          <span class="fi">·05</span>
+          <div><div class="ft">Missing &amp; merged cells</div>
+          <div class="fd">Blank PO numbers, merged headers, scanned PDFs — the rows Excel quietly drops.</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ THE ENGINE ============ -->
+<section class="section rule-top" id="engine">
+  <div class="wrap">
+    <div style="max-width:760px">
+      <span class="eyebrow reveal"><span class="idx">02</span>&nbsp;The engine</span>
+      <h2 class="h-sec reveal d1" style="margin-top:20px">Four gates. Every line resolved, or flagged.</h2>
+      <p class="lede reveal d2" style="margin-top:18px">Messy sources flow in on the left. Each row passes through four matching layers — most resolve green at the first gate; a precise few reach AI fallback for human review. Watch it run.</p>
+    </div>
+
+    <div class="engine-wrap reveal d2">
+      <div class="engine" id="engine-board">
+        <!-- SVG beams -->
+        <svg class="beams" id="beams" aria-hidden="true"></svg>
+        <!-- token overlay -->
+        <div class="tokens" id="tokens" aria-hidden="true"></div>
+
+        <!-- LEFT: sources -->
+        <div class="engine-col" id="col-src">
+          <div class="col-head"><span class="t">Sources</span><span class="c" id="src-count">6 feeds</span></div>
+          <div class="src">
+            <div class="src-item"><span class="si-ic erp"></span><span class="si-n">ERP · Goods Receipts</span><span class="si-m">GRN</span><span class="src-anchor" data-src="erp"></span></div>
+            <div class="src-item"><span class="si-ic"></span><span class="si-n">Shenzhen Ruiyang</span><span class="si-m">xlsx</span><span class="src-anchor" data-src="s1"></span></div>
+            <div class="src-item"><span class="si-ic"></span><span class="si-n">Acme Components</span><span class="si-m">csv</span><span class="src-anchor" data-src="s2"></span></div>
+            <div class="src-item"><span class="si-ic"></span><span class="si-n">Tan Seng Metals</span><span class="si-m">pdf</span><span class="src-anchor" data-src="s3"></span></div>
+            <div class="src-item"><span class="si-ic"></span><span class="si-n">Yongtai Industrial</span><span class="si-m">xls</span><span class="src-anchor" data-src="s4"></span></div>
+            <div class="src-item"><span class="si-ic"></span><span class="si-n">Bangkok Polymer</span><span class="si-m">scan</span><span class="src-anchor" data-src="s5"></span></div>
+          </div>
+          <button class="btn btn-ghost" id="run-btn" style="margin-top:20px;width:100%;justify-content:center;font-size:13px;padding:10px">Re-run match ↻</button>
+        </div>
+
+        <!-- MIDDLE: gates -->
+        <div class="engine-col" id="col-gates">
+          <div class="col-head"><span class="t">Matching engine</span><span class="c" id="gate-progress">0 / 0</span></div>
+          <div class="gates">
+            <div class="gate" data-gate="0">
+              <span class="gate-anchor-in"  data-gin="0"></span>
+              <div class="gate-top"><span class="gate-name"><span class="gate-idx">1</span>Exact Match</span><span class="gate-count" data-gc="0">0</span></div>
+              <div class="gate-sub">PO + part number</div>
+              <div class="gate-bar"><i data-gbar="0"></i></div>
+              <span class="gate-anchor-out" data-gout="0"></span>
+            </div>
+            <div class="gate" data-gate="1">
+              <span class="gate-anchor-in"  data-gin="1"></span>
+              <div class="gate-top"><span class="gate-name"><span class="gate-idx">2</span>Fuzzy Match</span><span class="gate-count" data-gc="1">0</span></div>
+              <div class="gate-sub">Normalized keys · trailing .0</div>
+              <div class="gate-bar"><i data-gbar="1"></i></div>
+              <span class="gate-anchor-out" data-gout="1"></span>
+            </div>
+            <div class="gate" data-gate="2">
+              <span class="gate-anchor-in"  data-gin="2"></span>
+              <div class="gate-top"><span class="gate-name"><span class="gate-idx">3</span>Multi-PO</span><span class="gate-count" data-gc="2">0</span></div>
+              <div class="gate-sub">Aggregated deliveries</div>
+              <div class="gate-bar"><i data-gbar="2"></i></div>
+              <span class="gate-anchor-out" data-gout="2"></span>
+            </div>
+            <div class="gate ai" data-gate="3">
+              <span class="gate-anchor-in"  data-gin="3"></span>
+              <div class="gate-top"><span class="gate-name"><span class="gate-idx">4</span>AI Fallback</span><span class="gate-count" data-gc="3">0</span></div>
+              <div class="gate-sub">Flagged for human review</div>
+              <div class="gate-bar"><i data-gbar="3"></i></div>
+              <span class="gate-anchor-out" data-gout="3"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: ledger output -->
+        <div class="engine-col" id="col-ledger">
+          <div class="col-head"><span class="t">Reconciled ledger</span><span class="c"><span class="dot dot-green" style="display:inline-block;margin-right:5px"></span>matched</span></div>
+          <div class="ledger-head">
+            <span class="ledger-tally"><span data-tally>0</span><span class="of"> / <span data-total>0</span></span></span>
+            <span class="cap" style="margin-bottom:4px">lines</span>
+            <span class="gate-anchor-ledger" data-ledger style="margin-left:auto"></span>
+          </div>
+          <div class="ledger-rows" id="ledger-rows"></div>
+          <div class="discrep" id="discrep" style="display:none">
+            <div class="dh"><span class="dot dot-amber"></span>Discrepancy report</div>
+            <div class="dt"><b>1 line</b> on Bangkok Polymer statement (<span class="mono">PO 428804 · 180 units</span>) has no matching ERP receipt — <b>flagged for review</b>.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="engine-foot">
+        <div class="engine-legend">
+          <span class="lg"><span class="dot dot-green"></span>Reconciled · ~80% exact</span>
+          <span class="lg"><span class="dot dot-amber"></span>Human review · &lt;2%</span>
+          <span class="lg" style="color:var(--ink-mute)">18,420 lines / monthly cycle</span>
+        </div>
+        <a href="#demo" class="btn btn-green">Run it on your data <span class="arrow">→</span></a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ THE RESULT ============ -->
+<section class="section rule-top" id="result">
+  <div class="wrap">
+    <div style="max-width:760px">
+      <span class="eyebrow reveal"><span class="idx">03</span>&nbsp;The result</span>
+      <h2 class="h-sec reveal d1" style="margin-top:20px">Books that close in a day — and an audit trail that proves it.</h2>
+    </div>
+
+    <div class="stat-row reveal d1">
+      <div class="stat"><div class="k">Auto-match rate</div><div class="v green"><span class="ticker" data-to="97.3" data-dec="1">97.3</span>%</div><div class="s">across 240 active suppliers</div></div>
+      <div class="stat"><div class="k">Close time</div><div class="v">7.0<span style="color:var(--ink-faint)">→</span><span class="green">1.5</span><small style="font-size:0.4em;color:var(--ink-mute)">d</small></div><div class="s">per monthly reconciliation</div></div>
+      <div class="stat"><div class="k">Lines reconciled</div><div class="v"><span class="ticker" data-to="18420" data-dec="0">18,420</span></div><div class="s">every monthly cycle</div></div>
+      <div class="stat"><div class="k">Flagged for review</div><div class="v" style="color:var(--review)"><span class="ticker" data-to="1.1" data-dec="1">1.1</span>%</div><div class="s">true exceptions, not noise</div></div>
+    </div>
+
+    <div class="panel-ledger reveal d2" style="margin-top:44px">
+      <table class="recon-table">
+        <thead><tr>
+          <th>PO Number</th><th>Part</th><th>Layer</th><th class="r">ERP Qty</th><th class="r">Stmt Qty</th><th class="r">Amount ¥</th><th class="r">Status</th>
+        </tr></thead>
+        <tbody>
+          <tr class="matched"><td class="po-cell">PO-428759</td><td>RY-08831</td><td>Exact</td><td class="r">1,200</td><td class="r">1,200</td><td class="r">4,104.00</td><td class="r"><span class="tag-matched pill">Matched</span></td></tr>
+          <tr class="matched"><td class="po-cell">PO-428760</td><td>RY-08842</td><td>Exact</td><td class="r">640</td><td class="r">640</td><td class="r">5,824.00</td><td class="r"><span class="tag-matched pill">Matched</span></td></tr>
+          <tr class="matched"><td class="po-cell">PO-428762</td><td>AC-1190</td><td>Fuzzy</td><td class="r">300</td><td class="r">300</td><td class="r">2,730.00</td><td class="r"><span class="tag-matched pill">Matched</span></td></tr>
+          <tr class="matched"><td class="po-cell">PO-428780</td><td>TS-562</td><td>Multi-PO</td><td class="r">1,890</td><td class="r">1,890</td><td class="r">1,890.00</td><td class="r"><span class="tag-matched pill">Matched</span></td></tr>
+          <tr class="flagged"><td class="po-cell">PO-428804</td><td>BP-007</td><td>AI</td><td class="r" style="color:var(--ink-faint)">—</td><td class="r">180</td><td class="r">3,240.00</td><td class="r"><span class="tag-review pill">Not in ERP</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ============ BENTO ============ -->
+<section class="section rule-top">
+  <div class="wrap">
+    <div style="max-width:760px">
+      <span class="eyebrow reveal">Beyond reconciliation</span>
+      <h2 class="h-sec reveal d1" style="margin-top:20px">One co-pilot for the whole close.</h2>
+    </div>
+    <div class="bento reveal d1">
+      <div class="cell w3">
+        <span class="ci">/ bank-reconciliation</span>
+        <h4>Bank reconciliation</h4>
+        <p>Match bank lines to invoices and receipts across every entity account, in every currency.</p>
+        <span class="mini">99.1% auto-cleared</span>
+      </div>
+      <div class="cell w3">
+        <span class="ci">/ consolidation</span>
+        <h4>Multi-entity consolidation</h4>
+        <p>Roll up subsidiaries across HK, SG, CN and TH — intercompany eliminations reconciled automatically.</p>
+        <span class="mini">14 entities · 1 ledger</span>
+      </div>
+      <div class="cell w2">
+        <span class="ci">/ forecast</span>
+        <h4>Cash forecasting</h4>
+        <p>Forward your reconciled position into a 13-week cash view.</p>
+      </div>
+      <div class="cell w2">
+        <span class="ci">/ ingestion</span>
+        <h4>Statement ingestion</h4>
+        <p>xlsx, csv, pdf, scans — any layout, any language, normalized on upload.</p>
+        <span class="mini">5+ formats</span>
+      </div>
+      <div class="cell w2">
+        <span class="ci">/ audit</span>
+        <h4>Audit-ready trail</h4>
+        <p>Every match, override and resolution note logged and exportable for your auditors.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ MARQUEE ============ -->
+<section class="marquee" aria-label="Supported systems">
+  <div class="marquee-track" id="marq-track"></div>
+</section>
+
+<!-- ============ PRICING ============ -->
+<section class="section rule-top" id="pricing">
+  <div class="wrap">
+    <div style="max-width:760px">
+      <span class="eyebrow reveal">Pricing</span>
+      <h2 class="h-sec reveal d1" style="margin-top:20px">Priced per entity. Calm and predictable.</h2>
+    </div>
+    <div class="pricing reveal d1">
+      <div class="tier">
+        <span class="tn">Close</span>
+        <div class="tp">$<span class="mono">490</span><small> / entity · mo</small></div>
+        <p class="td">For a single team closing one set of books each month.</p>
+        <ul>
+          <li><span class="tk">✓</span>Supplier reconciliation · 4-layer engine</li>
+          <li><span class="tk">✓</span>Up to 50 suppliers</li>
+          <li><span class="tk">✓</span>Statement ingestion, all formats</li>
+          <li><span class="tk">✓</span>Audit trail &amp; CSV export</li>
+        </ul>
+        <a href="#demo" class="btn btn-ghost">Start a trial</a>
+      </div>
+      <div class="tier feature">
+        <span class="tn">Consolidate</span>
+        <div class="tp">$<span class="mono">1,290</span><small> / entity · mo</small></div>
+        <p class="td">For finance teams running multiple entities across the region.</p>
+        <ul>
+          <li><span class="tk">✓</span>Everything in Close</li>
+          <li><span class="tk">✓</span>Unlimited suppliers</li>
+          <li><span class="tk">✓</span>Multi-entity consolidation</li>
+          <li><span class="tk">✓</span>Bank reconciliation &amp; cash forecast</li>
+          <li><span class="tk">✓</span>SSO &amp; role-based approvals</li>
+        </ul>
+        <a href="#demo" class="btn btn-green">Book a demo</a>
+      </div>
+      <div class="tier">
+        <span class="tn">Enterprise</span>
+        <div class="tp"><span class="mono">Custom</span></div>
+        <p class="td">For groups with bespoke ERP estates and audit requirements.</p>
+        <ul>
+          <li><span class="tk">✓</span>Everything in Consolidate</li>
+          <li><span class="tk">✓</span>Dedicated ERP connectors</li>
+          <li><span class="tk">✓</span>On-prem / VPC deployment</li>
+          <li><span class="tk">✓</span>SLA &amp; named support</li>
+        </ul>
+        <a href="#demo" class="btn btn-ghost">Talk to us</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CTA BAND ============ -->
+<section class="cta-band rule-top" id="demo">
+  <div class="ledger-bg" aria-hidden="true"></div>
+  <div class="wrap">
+    <h2 class="display reveal" style="font-size:clamp(34px,5vw,68px)">Close your next period<br/>in a day, not a week.</h2>
+    <p class="lede reveal d1" style="margin:22px auto 32px;text-align:center">See Credarion reconcile a month of your own supplier statements — live, in under twenty minutes.</p>
+    <div class="reveal d2" style="display:flex;gap:14px;justify-content:center;flex-wrap:wrap">
+      <a href="#demo" class="btn btn-ink">Book a demo <span class="arrow">→</span></a>
+      <a href="#engine" class="btn btn-ghost">Watch the engine again</a>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<!-- ============ FOOTER ============ -->
+<footer class="foot">
+  <div class="wrap">
+    <div class="foot-grid">
+      <div class="foot-col">
+        <a class="brand" href="#top" style="margin-bottom:16px">
+          <svg class="mark" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+            <rect x="0.5" y="0.5" width="21" height="21" stroke="#0A0A0A"/>
+            <line x1="4" y1="7" x2="11" y2="7" stroke="#8B897F" stroke-width="1.4"/>
+            <line x1="6" y1="11" x2="11" y2="11" stroke="#8B897F" stroke-width="1.4"/>
+            <line x1="11" y1="9" x2="18" y2="9" stroke="#15734A" stroke-width="1.6"/>
+            <path d="M14.5 9 L11 12.5 L9 10.5" stroke="#15734A" stroke-width="1.6" fill="none" stroke-linecap="square"/>
+          </svg>
+          <span class="word">Credarion</span>
+        </a>
+        <p class="lede" style="font-size:14px;max-width:34ch">The AI accounting co-pilot for Asia-Pacific mid-market finance. Reconciliation, resolved.</p>
+      </div>
+      <div class="foot-col">
+        <h5>Product</h5>
+        <a href="#engine">The engine</a>
+        <a href="#mess">Statement ingestion</a>
+        <a href="#result">Reconciliation</a>
+        <a href="#">Consolidation</a>
+        <a href="#">Cash forecasting</a>
+      </div>
+      <div class="foot-col">
+        <h5>Company</h5>
+        <a href="#">About</a>
+        <a href="#">Security</a>
+        <a href="#">Audit &amp; compliance</a>
+        <a href="#">Careers</a>
+      </div>
+      <div class="foot-col">
+        <h5>Connect</h5>
+        <a href="#demo">Book a demo</a>
+        <a href="#">Documentation</a>
+        <a href="#">Status</a>
+        <a href="#">Contact</a>
+      </div>
+    </div>
+    <div class="foot-bottom">
+      <span class="cap">© 2026 Credarion Pte. Ltd. · Singapore</span>
+      <span class="cap" style="display:inline-flex;align-items:center;gap:8px"><span class="dot dot-green"></span>All systems reconciled</span>
+    </div>
+  </div>
+</footer>
+
+<script src="credarion/engine.js"></script>
+<script src="credarion/site.js"></script>
+</body>
+</html>

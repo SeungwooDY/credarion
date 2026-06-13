@@ -1,0 +1,236 @@
+/* ============================================================
+   CREDARION — Design Theme
+   A precision instrument for financial clarity.
+   Light, editorial, Swiss grid. Functional color only.
+   ============================================================ */
+
+/* ---- 1. Tokens -------------------------------------------- */
+:root {
+  /* Surface — warm "fresh ledger" paper */
+  --paper:        #FAFAF9;
+  --paper-2:      #F4F4F1;   /* faint panel / alt section */
+  --card:         #FFFFFF;
+
+  /* Ink */
+  --ink:          #0A0A0A;
+  --ink-soft:     #56554F;   /* secondary text, warm grey */
+  --ink-mute:     #8B897F;   /* tertiary / captions */
+  --ink-faint:    #B6B4A9;   /* placeholder / disabled */
+
+  /* Functional color — the ONLY palette */
+  --matched:      #15734A;   /* green = reconciled / matched   */
+  --matched-2:    #1C8A5A;   /* brighter green for ticks       */
+  --matched-tint: #EDF4EF;   /* green wash for matched rows     */
+  --matched-line: #C5DECC;
+
+  --review:       #9A6510;   /* amber = discrepancy / review    */
+  --review-2:     #B27D17;
+  --review-tint:  #F8F1E2;
+  --review-line:  #E6D4AC;
+
+  --alert:        #A12017;   /* red — used very sparingly       */
+  --alert-tint:   #F8ECEA;
+
+  /* Hairlines — ruled ledger paper */
+  --rule:         rgba(10,10,10,0.10);
+  --rule-2:       rgba(10,10,10,0.16);
+  --rule-strong:  rgba(10,10,10,0.26);
+  --grid-line:    rgba(10,10,10,0.035);
+
+  /* Type */
+  --sans: "Geist", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --mono: "Geist Mono", "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Layout */
+  --maxw: 1240px;
+  --gutter: clamp(20px, 5vw, 64px);
+  --pad-section: clamp(72px, 11vh, 140px);
+
+  /* Motion — mechanical, never bouncy */
+  --snap:   360ms cubic-bezier(.16,.84,.28,1);
+  --snap-fast: 240ms cubic-bezier(.2,.9,.3,1);
+  --ease:   320ms cubic-bezier(.4,0,.2,1);
+}
+
+/* ---- 2. Reset / base -------------------------------------- */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+
+body {
+  font-family: var(--sans);
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 17px;
+  line-height: 1.55;
+  font-feature-settings: "ss01", "cv01";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow-x: hidden;
+}
+
+::selection { background: var(--matched); color: #fff; }
+
+a { color: inherit; text-decoration: none; }
+button { font-family: inherit; border: none; background: none; cursor: pointer; }
+
+/* tabular numerals everywhere a number lives */
+.mono, .num {
+  font-family: var(--mono);
+  font-feature-settings: "tnum", "zero";
+  font-variant-numeric: tabular-nums slashed-zero;
+  letter-spacing: -0.01em;
+}
+
+/* ---- 3. Layout primitives --------------------------------- */
+.wrap {
+  width: 100%;
+  max-width: var(--maxw);
+  margin-inline: auto;
+  padding-inline: var(--gutter);
+}
+
+.section { position: relative; padding-block: var(--pad-section); }
+.rule-top { border-top: 1px solid var(--rule); }
+.rule-bottom { border-bottom: 1px solid var(--rule); }
+
+/* faint full-bleed ledger grid */
+.ledger-bg {
+  position: absolute; inset: 0;
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 64px 64px;
+  pointer-events: none;
+  -webkit-mask-image: radial-gradient(120% 80% at 50% 0%, #000 35%, transparent 78%);
+          mask-image: radial-gradient(120% 80% at 50% 0%, #000 35%, transparent 78%);
+}
+
+/* section eyebrow: 00 — LABEL */
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+.eyebrow .idx { color: var(--matched); }
+.eyebrow::before {
+  content: "";
+  width: 28px; height: 1px;
+  background: var(--rule-strong);
+}
+
+/* ---- 4. Type scale ---------------------------------------- */
+.display {
+  font-weight: 600;
+  font-size: clamp(40px, 6.4vw, 84px);
+  line-height: 0.98;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+.h-sec {
+  font-weight: 600;
+  font-size: clamp(30px, 4vw, 52px);
+  line-height: 1.04;
+  letter-spacing: -0.03em;
+  text-wrap: balance;
+}
+.h-sub {
+  font-weight: 540;
+  font-size: clamp(20px, 2.1vw, 26px);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+.lede {
+  font-size: clamp(17px, 1.35vw, 20px);
+  line-height: 1.5;
+  color: var(--ink-soft);
+  max-width: 54ch;
+  text-wrap: pretty;
+}
+.cap {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--ink-mute);
+}
+
+/* ---- 5. Buttons ------------------------------------------- */
+.btn {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-size: 14.5px; font-weight: 540;
+  padding: 12px 20px;
+  border: 1px solid transparent;
+  transition: background var(--ease), color var(--ease), border-color var(--ease), transform var(--snap-fast);
+  white-space: nowrap;
+}
+.btn:active { transform: translateY(1px); }
+.btn-ink  { background: var(--ink); color: var(--paper); }
+.btn-ink:hover { background: #232320; }
+.btn-ghost { background: transparent; color: var(--ink); border-color: var(--rule-2); }
+.btn-ghost:hover { border-color: var(--ink); }
+.btn-green { background: var(--matched); color: #fff; }
+.btn-green:hover { background: #11623F; }
+.btn .arrow { transition: transform var(--snap); }
+.btn:hover .arrow { transform: translateX(4px); }
+
+/* ---- 6. Chips / badges / tags ----------------------------- */
+.pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-family: var(--mono);
+  font-size: 11px; letter-spacing: 0.04em;
+  padding: 4px 9px;
+  border: 1px solid var(--rule-2);
+  text-transform: uppercase;
+}
+.dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.dot-green  { background: var(--matched-2); }
+.dot-amber  { background: var(--review-2); }
+.dot-red    { background: var(--alert); }
+
+.tag-matched { color: var(--matched); border-color: var(--matched-line); background: var(--matched-tint); }
+.tag-review  { color: var(--review);  border-color: var(--review-line);  background: var(--review-tint); }
+.tag-alert   { color: var(--alert);   border-color: #E7C4C0;             background: var(--alert-tint); }
+
+/* ---- 7. Cards / panels ------------------------------------ */
+.panel {
+  background: var(--card);
+  border: 1px solid var(--rule-2);
+}
+.panel-ledger {
+  background: var(--card);
+  border: 1px solid var(--rule-2);
+  box-shadow: 0 1px 0 rgba(10,10,10,0.02);
+}
+
+/* a "data readout" framed block with internal hairlines */
+.readout { background: var(--card); border: 1px solid var(--ink); }
+.readout .row { display: flex; align-items: baseline; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--rule); }
+.readout .row:last-child { border-bottom: none; }
+
+/* ---- 8. Reveal on scroll ---------------------------------- */
+/* Base state = the VISIBLE end-state, so print / PDF / no-JS / reduced-motion
+   always show content. The pre-animation hidden state is only applied once JS
+   "arms" the page AND motion is allowed. */
+.reveal { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: no-preference) {
+  html.js-armed .reveal {
+    transition: opacity .7s cubic-bezier(.2,.7,.2,1), transform .7s cubic-bezier(.2,.7,.2,1);
+  }
+  html.js-armed .reveal:not(.in) { opacity: 0; transform: translateY(14px); }
+  html.js-armed .reveal.d1 { transition-delay: .06s; }
+  html.js-armed .reveal.d2 { transition-delay: .12s; }
+  html.js-armed .reveal.d3 { transition-delay: .18s; }
+  html.js-armed .reveal.d4 { transition-delay: .24s; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; scroll-behavior: auto; }
+  .reveal { opacity: 1; transform: none; }
+}

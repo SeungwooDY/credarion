@@ -13,6 +13,11 @@
   --font-mono: var(--font-geist-mono);
 }
 
+:root {
+  /* Default click-ripple color for <RippleButton /> (components/ui/multi-type-ripple-buttons) */
+  --button-ripple-color: rgba(0, 0, 0, 0.1);
+}
+
 body {
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
 }
