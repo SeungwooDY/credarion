@@ -1,14 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
 import PageHeader from "./components/page-header";
-
-interface Org {
-  id: string;
-  name: string;
-  reporting_currency: string;
-}
+import { useOrgs } from "./components/data-provider";
 
 function ProgressRing({ percent, size = 80 }: { percent: number; size?: number }) {
   const strokeWidth = 6;
@@ -42,18 +37,8 @@ function ProgressRing({ percent, size = 80 }: { percent: number; size?: number }
 }
 
 export default function DashboardPage() {
-  const [orgs, setOrgs] = useState<Org[]>([]);
-  const [apiOk, setApiOk] = useState<boolean | null>(null);
-
-  useEffect(() => {
-    fetch("/api/v1/orgs")
-      .then((r) => r.json())
-      .then((data) => {
-        setOrgs(data);
-        setApiOk(true);
-      })
-      .catch(() => setApiOk(false));
-  }, []);
+  const { orgs, orgsLoading } = useOrgs();
+  const apiOk = orgsLoading ? null : orgs.length >= 0 ? true : false;
 
   const enginePhase = 7;
   const totalPhases = 10;

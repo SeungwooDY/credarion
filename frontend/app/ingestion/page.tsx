@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import PageHeader from "../components/page-header";
+import { useOrgs } from "../components/data-provider";
 
 interface Org {
   id: string;
@@ -48,7 +49,7 @@ const FIELD_LABELS: Record<string, string> = {
 };
 
 export default function IngestionPage() {
-  const [orgs, setOrgs] = useState<Org[]>([]);
+  const { orgs } = useOrgs();
   const [orgId, setOrgId] = useState("");
 
   const [grnFile, setGrnFile] = useState<File | null>(null);
@@ -66,14 +67,8 @@ export default function IngestionPage() {
   const [duplicateInfo, setDuplicateInfo] = useState<DuplicateInfo | null>(null);
 
   useEffect(() => {
-    fetch("/api/v1/orgs")
-      .then((r) => r.json())
-      .then((data) => {
-        setOrgs(data);
-        if (data.length > 0) setOrgId(data[0].id);
-      })
-      .catch(() => {});
-  }, []);
+    if (orgs.length > 0 && !orgId) setOrgId(orgs[0].id);
+  }, [orgs, orgId]);
 
   async function uploadGRN() {
     if (!grnFile || !orgId) return;

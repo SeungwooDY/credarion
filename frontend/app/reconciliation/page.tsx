@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import PageHeader from "../components/page-header";
 import StatusBadge from "../components/status-badge";
+import { useOrgs } from "../components/data-provider";
 
 interface Org {
   id: string;
@@ -114,7 +115,7 @@ function ThinkingIndicator({ supplierName }: { supplierName: string }) {
 }
 
 export default function ReconciliationPage() {
-  const [orgs, setOrgs] = useState<Org[]>([]);
+  const { orgs } = useOrgs();
   const [orgId, setOrgId] = useState("");
   const [period, setPeriod] = useState("2026-03");
   const [suppliers, setSuppliers] = useState<SupplierReady[]>([]);
@@ -127,14 +128,8 @@ export default function ReconciliationPage() {
   const [results, setResults] = useState<ResultRow[]>([]);
 
   useEffect(() => {
-    fetch("/api/v1/orgs")
-      .then((r) => r.json())
-      .then((data) => {
-        setOrgs(data);
-        if (data.length > 0) setOrgId(data[0].id);
-      })
-      .catch(() => {});
-  }, []);
+    if (orgs.length > 0 && !orgId) setOrgId(orgs[0].id);
+  }, [orgs, orgId]);
 
   const loadSuppliers = useCallback(() => {
     if (!orgId || !period) return;

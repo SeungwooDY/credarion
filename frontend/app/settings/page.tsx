@@ -2,11 +2,7 @@
 
 import { useEffect, useState } from "react";
 import PageHeader from "../components/page-header";
-
-interface Org {
-  id: string;
-  name: string;
-}
+import { useOrgs } from "../components/data-provider";
 
 interface ReconConfig {
   org_id: string;
@@ -18,7 +14,7 @@ interface ReconConfig {
 }
 
 export default function SettingsPage() {
-  const [orgs, setOrgs] = useState<Org[]>([]);
+  const { orgs, refreshOrgs } = useOrgs();
   const [orgId, setOrgId] = useState("");
   const [newOrgName, setNewOrgName] = useState("");
   const [orgMsg, setOrgMsg] = useState("");
@@ -26,14 +22,8 @@ export default function SettingsPage() {
   const [configMsg, setConfigMsg] = useState("");
 
   useEffect(() => {
-    fetch("/api/v1/orgs")
-      .then((r) => r.json())
-      .then((data) => {
-        setOrgs(data);
-        if (data.length > 0) setOrgId(data[0].id);
-      })
-      .catch(() => {});
-  }, []);
+    if (orgs.length > 0 && !orgId) setOrgId(orgs[0].id);
+  }, [orgs, orgId]);
 
   useEffect(() => {
     if (!orgId) return;
@@ -55,10 +45,7 @@ export default function SettingsPage() {
       if (res.ok) {
         setOrgMsg(`Created: ${data.name}`);
         setNewOrgName("");
-        // Reload
-        const orgsRes = await fetch("/api/v1/orgs");
-        const updated = await orgsRes.json();
-        setOrgs(updated);
+        await refreshOrgs();
         setOrgId(data.id);
       } else {
         setOrgMsg(`Error: ${data.detail || JSON.stringify(data)}`);
@@ -103,7 +90,7 @@ export default function SettingsPage() {
 
       <div className="grid grid-cols-2 gap-6">
         {/* Organization Management */}
-        <div className="border border-[var(--border)] rounded-lg p-5">
+        <div className="border border-border rounded-lg p-5">
           <h3 className="font-semibold text-sm mb-4">Organizations</h3>
 
           <div className="space-y-2 mb-4">
@@ -111,7 +98,7 @@ export default function SettingsPage() {
               <div
                 key={o.id}
                 className={`flex items-center justify-between p-2 rounded text-sm ${
-                  o.id === orgId ? "bg-[var(--muted)] font-medium" : ""
+                  o.id === orgId ? "bg-muted font-medium" : ""
                 }`}
               >
                 <span
@@ -127,7 +114,7 @@ export default function SettingsPage() {
             ))}
           </div>
 
-          <hr className="border-[var(--border)] mb-4" />
+          <hr className="border-border mb-4" />
 
           <label className="block text-xs font-medium mb-1">
             Create New Organization
@@ -138,25 +125,25 @@ export default function SettingsPage() {
               value={newOrgName}
               onChange={(e) => setNewOrgName(e.target.value)}
               placeholder="e.g. 梅州国威电子有限公司"
-              className="flex-1 border border-[var(--border)] rounded px-3 py-2 text-sm bg-white"
+              className="flex-1 border border-border rounded px-3 py-2 text-sm bg-white"
             />
             <button
               onClick={createOrg}
               disabled={!newOrgName.trim()}
-              className="px-4 py-2 bg-[var(--accent)] text-white rounded text-sm disabled:opacity-40"
+              className="px-4 py-2 bg-accent text-white rounded text-sm disabled:opacity-40"
             >
               Create
             </button>
           </div>
           {orgMsg && (
-            <div className="mt-2 text-xs p-2 bg-[var(--muted)] rounded">
+            <div className="mt-2 text-xs p-2 bg-muted rounded">
               {orgMsg}
             </div>
           )}
         </div>
 
         {/* Reconciliation Config */}
-        <div className="border border-[var(--border)] rounded-lg p-5">
+        <div className="border border-border rounded-lg p-5">
           <h3 className="font-semibold text-sm mb-4">
             Reconciliation Config
           </h3>
@@ -177,7 +164,7 @@ export default function SettingsPage() {
                       qty_tolerance_pct: parseFloat(e.target.value),
                     })
                   }
-                  className="border border-[var(--border)] rounded px-3 py-2 text-sm w-full bg-white"
+                  className="border border-border rounded px-3 py-2 text-sm w-full bg-white"
                 />
               </div>
               <div>
@@ -194,7 +181,7 @@ export default function SettingsPage() {
                       price_tolerance_pct: parseFloat(e.target.value),
                     })
                   }
-                  className="border border-[var(--border)] rounded px-3 py-2 text-sm w-full bg-white"
+                  className="border border-border rounded px-3 py-2 text-sm w-full bg-white"
                 />
               </div>
               <div className="flex items-center gap-2">
@@ -236,13 +223,13 @@ export default function SettingsPage() {
                       ai_max_tokens_per_run: parseInt(e.target.value),
                     })
                   }
-                  className="border border-[var(--border)] rounded px-3 py-2 text-sm w-full bg-white"
+                  className="border border-border rounded px-3 py-2 text-sm w-full bg-white"
                 />
               </div>
 
               <button
                 onClick={saveConfig}
-                className="px-4 py-2 bg-[var(--accent)] text-white rounded text-sm"
+                className="px-4 py-2 bg-accent text-white rounded text-sm"
               >
                 Save Config
               </button>

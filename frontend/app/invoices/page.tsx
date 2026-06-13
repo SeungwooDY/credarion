@@ -3,11 +3,7 @@
 import { useEffect, useState } from "react";
 import PageHeader from "../components/page-header";
 import StatusBadge from "../components/status-badge";
-
-interface Org {
-  id: string;
-  name: string;
-}
+import { useOrgs } from "../components/data-provider";
 
 interface InvoiceListItem {
   id: string;
@@ -49,7 +45,7 @@ interface InvoiceDetail {
 }
 
 export default function InvoicesPage() {
-  const [orgs, setOrgs] = useState<Org[]>([]);
+  const { orgs } = useOrgs();
   const [orgId, setOrgId] = useState("");
   const [invoices, setInvoices] = useState<InvoiceListItem[]>([]);
   const [statusFilter, setStatusFilter] = useState("");
@@ -63,14 +59,8 @@ export default function InvoicesPage() {
   const [extracting, setExtracting] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/api/v1/orgs")
-      .then((r) => r.json())
-      .then((data) => {
-        setOrgs(data);
-        if (data.length > 0) setOrgId(data[0].id);
-      })
-      .catch(() => {});
-  }, []);
+    if (orgs.length > 0 && !orgId) setOrgId(orgs[0].id);
+  }, [orgs, orgId]);
 
   useEffect(() => {
     if (orgId) loadInvoices();
