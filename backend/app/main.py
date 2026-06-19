@@ -1,10 +1,11 @@
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.responses import HTMLResponse
 
-from app.routers import chat, erp, invoices, orgs, reconciliation, statements
+from app.auth_deps import enforce_org_scope
+from app.routers import auth, chat, erp, invoices, orgs, reconciliation, statements
 
 # Configure logging so reconciliation debug output is visible
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -12,12 +13,18 @@ logging.getLogger("app.reconciliation").setLevel(logging.DEBUG)
 
 app = FastAPI(title="Credarion API", version="0.1.0")
 
-app.include_router(chat.router)
-app.include_router(statements.router)
-app.include_router(erp.router)
-app.include_router(orgs.router)
-app.include_router(reconciliation.router)
-app.include_router(invoices.router)
+# Auth endpoints are public (login) or self-guarding (me). Every other data
+# router requires a valid session and auto-scopes any org_id to the caller's
+# account via enforce_org_scope.
+_protected = [Depends(enforce_org_scope)]
+
+app.include_router(auth.router)
+app.include_router(chat.router, dependencies=_protected)
+app.include_router(statements.router, dependencies=_protected)
+app.include_router(erp.router, dependencies=_protected)
+app.include_router(orgs.router, dependencies=_protected)
+app.include_router(reconciliation.router, dependencies=_protected)
+app.include_router(invoices.router, dependencies=_protected)
 
 
 @app.get("/health")

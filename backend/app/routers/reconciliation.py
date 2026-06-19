@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
+from app.auth_deps import authorize_supplier, get_current_user
 from app.db import get_db
 from app.models import (
     ERPRecord,
@@ -19,6 +20,7 @@ from app.models import (
     StatementLineItem,
     Supplier,
     SupplierStatement,
+    User,
 )
 from app.reconciliation.orchestrator import run_reconciliation
 from app.reconciliation.schemas import (
@@ -191,8 +193,10 @@ async def list_suppliers_with_readiness(
 async def trigger_reconciliation(
     body: ReconciliationRunRequest,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> ReconciliationRunResponse:
     """Trigger reconciliation for a supplier+period."""
+    authorize_supplier(db, user, body.supplier_id)
     # Clean up stale "running" runs (stuck for > 5 minutes) before checking
     from datetime import timedelta
     stale_cutoff = datetime.utcnow() - timedelta(minutes=5)

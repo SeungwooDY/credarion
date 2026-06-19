@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import PageHeader from "../components/page-header";
-import { useOrgs } from "../lib/swr";
+import { useCurrentOrg } from "../lib/swr";
 
 interface POOverlapInfo {
   file_po_count: number;
@@ -44,8 +44,7 @@ const FIELD_LABELS: Record<string, string> = {
 };
 
 export default function IngestionPage() {
-  const { orgs } = useOrgs();
-  const [orgId, setOrgId] = useState("");
+  const { orgId } = useCurrentOrg();
 
   const [grnFile, setGrnFile] = useState<File | null>(null);
   const [grnStatus, setGrnStatus] = useState("");
@@ -60,10 +59,6 @@ export default function IngestionPage() {
 
   const [selectedPeriod, setSelectedPeriod] = useState("");
   const [duplicateInfo, setDuplicateInfo] = useState<DuplicateInfo | null>(null);
-
-  useEffect(() => {
-    if (orgs.length > 0 && !orgId) setOrgId(orgs[0].id);
-  }, [orgs, orgId]);
 
   async function uploadGRN() {
     if (!grnFile || !orgId) return;
@@ -211,23 +206,6 @@ export default function IngestionPage() {
         title="Data Ingestion"
         description="Upload ERP goods receipt exports and supplier reconciliation statements"
       />
-
-      {/* Org selector */}
-      <div className="mb-6">
-        <label className="block text-sm font-medium mb-1">Organization</label>
-        <select
-          value={orgId}
-          onChange={(e) => setOrgId(e.target.value)}
-          className="border border-border rounded-lg px-3 py-2 text-sm w-full max-w-sm bg-card focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
-        >
-          <option value="">Select...</option>
-          {orgs.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.name}
-            </option>
-          ))}
-        </select>
-      </div>
 
       <div className="grid grid-cols-2 gap-6">
         {/* GRN Upload */}

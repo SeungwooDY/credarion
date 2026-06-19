@@ -13,8 +13,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.auth_deps import authorize_org, get_current_user
 from app.db import SessionLocal, get_db
 from app.ingestion.grn_ingestor import GRNIngestionResult, ingest_grn
+from app.models import User
 
 router = APIRouter(prefix="/api/v1/erp", tags=["erp"])
 
@@ -34,12 +36,14 @@ async def upload_grn(
     file: UploadFile = File(...),
     org_id: uuid.UUID = Form(...),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> GRNIngestionResponse:
     """Upload an SGWERP GRN export file for ingestion.
 
     Accepts .csv, .xlsx, or .xls files. Automatically maps columns,
     upserts suppliers, normalizes data, and inserts erp_records.
     """
+    authorize_org(db, user, org_id)
     suffix = (
         "." + file.filename.rsplit(".", 1)[-1]
         if file.filename and "." in file.filename
@@ -75,12 +79,15 @@ async def upload_grn(
 async def upload_grn_stream(
     file: UploadFile = File(...),
     org_id: uuid.UUID = Form(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> StreamingResponse:
     """Upload GRN with SSE progress events.
 
     Returns a text/event-stream with progress updates during ingestion.
     Final event contains the full result.
     """
+    authorize_org(db, user, org_id)
     suffix = (
         "." + file.filename.rsplit(".", 1)[-1]
         if file.filename and "." in file.filename

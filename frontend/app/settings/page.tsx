@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import PageHeader from "../components/page-header";
-import { useOrgs, useReconConfig } from "../lib/swr";
+import { useCurrentOrg, useReconConfig } from "../lib/swr";
 
 interface ReconConfigForm {
   qty_tolerance_pct: number;
@@ -13,17 +13,10 @@ interface ReconConfigForm {
 }
 
 export default function SettingsPage() {
-  const { orgs, refreshOrgs } = useOrgs();
-  const [orgId, setOrgId] = useState("");
-  const [newOrgName, setNewOrgName] = useState("");
-  const [orgMsg, setOrgMsg] = useState("");
+  const { orgId, orgName } = useCurrentOrg();
   const { config, refreshConfig } = useReconConfig(orgId);
   const [formConfig, setFormConfig] = useState<ReconConfigForm | null>(null);
   const [configMsg, setConfigMsg] = useState("");
-
-  useEffect(() => {
-    if (orgs.length > 0 && !orgId) setOrgId(orgs[0].id);
-  }, [orgs, orgId]);
 
   // Sync SWR config into local form state
   useEffect(() => {
@@ -39,28 +32,6 @@ export default function SettingsPage() {
       setFormConfig(null);
     }
   }, [config]);
-
-  async function createOrg() {
-    if (!newOrgName.trim()) return;
-    try {
-      const res = await fetch("/api/v1/orgs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newOrgName.trim() }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setOrgMsg(`Created: ${data.name}`);
-        setNewOrgName("");
-        await refreshOrgs();
-        setOrgId(data.id);
-      } else {
-        setOrgMsg(`Error: ${data.detail || JSON.stringify(data)}`);
-      }
-    } catch (e) {
-      setOrgMsg(`Error: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
 
   async function saveConfig() {
     if (!formConfig || !orgId) return;
@@ -87,59 +58,23 @@ export default function SettingsPage() {
     <>
       <PageHeader
         title="Settings"
-        description="Manage organizations and reconciliation configuration"
+        description="Your organization and reconciliation configuration"
       />
 
       <div className="grid grid-cols-2 gap-6">
-        {/* Organization Management */}
+        {/* Organization */}
         <div className="border border-border rounded-lg p-5">
-          <h3 className="font-semibold text-sm mb-4">Organizations</h3>
-
-          <div className="space-y-2 mb-4">
-            {orgs.map((o) => (
-              <div
-                key={o.id}
-                className={`flex items-center justify-between p-2 rounded text-sm ${
-                  o.id === orgId ? "bg-muted font-medium" : ""
-                }`}
-              >
-                <span
-                  className="cursor-pointer"
-                  onClick={() => setOrgId(o.id)}
-                >
-                  {o.name}
-                </span>
-                <span className="text-xs text-zinc-400 font-mono">
-                  {o.id.slice(0, 8)}
-                </span>
-              </div>
-            ))}
-          </div>
-
-          <hr className="border-border mb-4" />
-
-          <label className="block text-xs font-medium mb-1">
-            Create New Organization
-          </label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={newOrgName}
-              onChange={(e) => setNewOrgName(e.target.value)}
-              placeholder="e.g. 梅州国威电子有限公司"
-              className="flex-1 border border-border rounded px-3 py-2 text-sm bg-white"
-            />
-            <button
-              onClick={createOrg}
-              disabled={!newOrgName.trim()}
-              className="px-4 py-2 bg-accent text-white rounded text-sm disabled:opacity-40"
-            >
-              Create
-            </button>
-          </div>
-          {orgMsg && (
-            <div className="mt-2 text-xs p-2 bg-muted rounded">
-              {orgMsg}
+          <h3 className="font-semibold text-sm mb-4">Organization</h3>
+          {orgId ? (
+            <div className="flex items-center justify-between p-2 rounded text-sm bg-muted font-medium">
+              <span>{orgName}</span>
+              <span className="text-xs text-zinc-400 font-mono">
+                {orgId.slice(0, 8)}
+              </span>
+            </div>
+          ) : (
+            <div className="text-sm text-zinc-400">
+              No organization is linked to your account yet.
             </div>
           )}
         </div>
@@ -243,7 +178,7 @@ export default function SettingsPage() {
             <div className="text-sm text-zinc-400">
               {orgId
                 ? "No config found for this org. Run a reconciliation first to auto-create defaults."
-                : "Select an organization."}
+                : "No organization is linked to your account yet."}
             </div>
           )}
         </div>

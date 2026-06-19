@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
-import { useOrgs } from "../lib/swr";
+import { useCurrentOrg } from "../lib/swr";
 
 interface Message {
   role: "user" | "assistant";
@@ -10,7 +10,7 @@ interface Message {
 }
 
 export default function ChatPanel() {
-  const { orgs } = useOrgs();
+  const { orgId: currentOrgId, orgName } = useCurrentOrg();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
@@ -18,8 +18,8 @@ export default function ChatPanel() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
-  // Use the first org as default — same as all other pages
-  const orgId = orgs.length > 0 ? orgs[0].id : null;
+  // The logged-in user's organization.
+  const orgId = currentOrgId || null;
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -125,8 +125,6 @@ export default function ChatPanel() {
       sendMessage();
     }
   }
-
-  const orgName = orgs.find((o) => o.id === orgId)?.name;
 
   return (
     <>

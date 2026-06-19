@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
 import PageHeader from "./components/page-header";
-import { useOrgs } from "./lib/swr";
+import { useMe, useOrgs } from "./lib/swr";
 
 function ProgressRing({ percent, size = 80 }: { percent: number; size?: number }) {
   const strokeWidth = 6;
@@ -38,7 +37,14 @@ function ProgressRing({ percent, size = 80 }: { percent: number; size?: number }
 
 export default function DashboardPage() {
   const { orgs, orgsLoading } = useOrgs();
+  const { me } = useMe();
   const apiOk = orgsLoading ? null : orgs.length >= 0 ? true : false;
+
+  const firstName = me?.full_name?.split(" ")[0] || me?.email?.split("@")[0];
+  const greeting = firstName ? `Welcome back, ${firstName}` : "Dashboard";
+  const subtitle = me?.account?.name
+    ? `${me.account.name} · Overview of your accounting co-pilot`
+    : "Overview of your accounting co-pilot";
 
   const enginePhase = 7;
   const totalPhases = 10;
@@ -46,10 +52,7 @@ export default function DashboardPage() {
 
   return (
     <>
-      <PageHeader
-        title="Dashboard"
-        description="Overview of your accounting co-pilot"
-      />
+      <PageHeader title={greeting} description={subtitle} />
 
       {/* Bento Grid */}
       <div className="grid grid-cols-3 grid-rows-[auto_auto] gap-4">

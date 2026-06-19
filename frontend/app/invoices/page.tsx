@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import PageHeader from "../components/page-header";
 import StatusBadge from "../components/status-badge";
-import { useOrgs, useInvoices } from "../lib/swr";
+import { useCurrentOrg, useInvoices } from "../lib/swr";
 
 interface InvoiceDetail {
   id: string;
@@ -32,8 +32,7 @@ interface InvoiceDetail {
 }
 
 export default function InvoicesPage() {
-  const { orgs } = useOrgs();
-  const [orgId, setOrgId] = useState("");
+  const { orgId } = useCurrentOrg();
   const [statusFilter, setStatusFilter] = useState("");
   const [reviewFilter, setReviewFilter] = useState("");
   const { invoices, refreshInvoices } = useInvoices(orgId, statusFilter, reviewFilter);
@@ -44,10 +43,6 @@ export default function InvoicesPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
   const [extracting, setExtracting] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (orgs.length > 0 && !orgId) setOrgId(orgs[0].id);
-  }, [orgs, orgId]);
 
 
   async function handleUpload() {
@@ -139,22 +134,6 @@ export default function InvoicesPage() {
       <div className="border border-[var(--border)] rounded-lg p-5 mb-6">
         <h3 className="font-semibold text-sm mb-3">Upload Invoices</h3>
         <div className="flex gap-4 items-end">
-          <div>
-            <label className="block text-xs font-medium mb-1">
-              Organization
-            </label>
-            <select
-              value={orgId}
-              onChange={(e) => setOrgId(e.target.value)}
-              className="border border-[var(--border)] rounded px-3 py-2 text-sm bg-white"
-            >
-              {orgs.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.name}
-                </option>
-              ))}
-            </select>
-          </div>
           <div>
             <label className="block text-xs font-medium mb-1">
               Files (PNG, JPG, PDF)

@@ -12,9 +12,12 @@ import ChatPanel from "./chat-panel";
  */
 export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const isMarketing = pathname === "/landing" || pathname.startsWith("/landing/");
+  const isBare =
+    pathname === "/landing" ||
+    pathname.startsWith("/landing/") ||
+    pathname === "/login";
 
-  if (isMarketing) {
+  if (isBare) {
     return <>{children}</>;
   }
 

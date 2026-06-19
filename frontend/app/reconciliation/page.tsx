@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import PageHeader from "../components/page-header";
 import StatusBadge from "../components/status-badge";
-import { useOrgs, useSuppliers } from "../lib/swr";
+import { useCurrentOrg, useSuppliers } from "../lib/swr";
 
 interface RunResult {
   run: {
@@ -97,8 +97,7 @@ function ThinkingIndicator({ supplierName }: { supplierName: string }) {
 }
 
 export default function ReconciliationPage() {
-  const { orgs } = useOrgs();
-  const [orgId, setOrgId] = useState("");
+  const { orgId } = useCurrentOrg();
   const [period, setPeriod] = useState("2026-03");
   const { suppliers, suppliersLoading, refreshSuppliers } = useSuppliers(orgId, period);
 
@@ -107,10 +106,6 @@ export default function ReconciliationPage() {
   const [error, setError] = useState("");
   const [runResult, setRunResult] = useState<RunResult | null>(null);
   const [results, setResults] = useState<ResultRow[]>([]);
-
-  useEffect(() => {
-    if (orgs.length > 0 && !orgId) setOrgId(orgs[0].id);
-  }, [orgs, orgId]);
 
   async function runReconciliation(sid?: string) {
     const targetId = sid || supplierId;
@@ -163,22 +158,6 @@ export default function ReconciliationPage() {
 
       {/* Controls */}
       <div className="flex gap-4 items-end mb-6">
-        <div>
-          <label className="block text-xs font-medium text-zinc-500 mb-1.5">
-            Organization
-          </label>
-          <select
-            value={orgId}
-            onChange={(e) => setOrgId(e.target.value)}
-            className="border border-border rounded-lg px-3 py-2 text-sm bg-card focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
-          >
-            {orgs.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.name}
-              </option>
-            ))}
-          </select>
-        </div>
         <div>
           <label className="block text-xs font-medium text-zinc-500 mb-1.5">Period</label>
           <input
