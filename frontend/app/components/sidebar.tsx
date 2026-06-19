@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useMe } from "../lib/swr";
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: "home" },
@@ -55,8 +56,29 @@ const ICONS: Record<string, React.ReactNode> = {
   ),
 };
 
+const PLAN_LABELS: Record<string, string> = {
+  starter: "Starter",
+  growth: "Growth",
+  enterprise: "Enterprise",
+};
+
 export default function Sidebar() {
   const pathname = usePathname();
+  const { me } = useMe();
+
+  async function handleLogout() {
+    try {
+      await fetch("/api/v1/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+    } finally {
+      window.location.assign("/login");
+    }
+  }
+
+  const displayName = me?.full_name || me?.email || "";
+  const initial = (displayName || "?").charAt(0).toUpperCase();
 
   return (
     <aside className="w-56 shrink-0 bg-background flex flex-col">
@@ -99,8 +121,41 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div className="px-5 py-4 text-[11px] text-zinc-300 tracking-wide">
-        v0.1.0
+      <div className="mt-auto px-3 pb-4 pt-2">
+        {me && (
+          <div className="rounded-xl bg-muted px-3 py-2.5">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#7c4dff] via-accent to-accent-dark text-[11px] font-bold text-white">
+                {initial}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] font-medium text-zinc-800">
+                  {displayName}
+                </div>
+                <div className="truncate text-[11px] text-zinc-400">
+                  {me.account.name}
+                  {PLAN_LABELS[me.account.plan]
+                    ? ` · ${PLAN_LABELS[me.account.plan]}`
+                    : ""}
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={handleLogout}
+              className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[12px] font-medium text-zinc-500 transition hover:bg-white hover:text-zinc-800"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
+                <polyline points="16 17 21 12 16 7" />
+                <line x1="21" y1="12" x2="9" y2="12" />
+              </svg>
+              Sign out
+            </button>
+          </div>
+        )}
+        <div className="px-2 pt-3 text-[11px] tracking-wide text-zinc-300">
+          v0.1.0
+        </div>
       </div>
     </aside>
   );

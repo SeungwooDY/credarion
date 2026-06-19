@@ -7,8 +7,9 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.auth_deps import get_current_user
 from app.db import get_db
-from app.models import Organization, Supplier
+from app.models import Organization, Supplier, User
 
 router = APIRouter(prefix="/api/v1/orgs", tags=["organizations"])
 
@@ -36,9 +37,14 @@ class SupplierResponse(BaseModel):
 async def create_org(
     body: OrgCreate,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> OrgResponse:
-    """Create a new organization."""
-    org = Organization(name=body.name, reporting_currency=body.reporting_currency)
+    """Create a new organization owned by the caller's account."""
+    org = Organization(
+        name=body.name,
+        reporting_currency=body.reporting_currency,
+        account_id=user.account_id,
+    )
     db.add(org)
     db.commit()
     db.refresh(org)
@@ -46,9 +52,15 @@ async def create_org(
 
 
 @router.get("", response_model=list[OrgResponse])
-async def list_orgs(db: Session = Depends(get_db)) -> list[OrgResponse]:
-    """List all organizations."""
-    orgs = db.query(Organization).all()
+async def list_orgs(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[OrgResponse]:
+    """List organizations owned by the caller's account (all, for superusers)."""
+    query = db.query(Organization)
+    if not user.is_superuser:
+        query = query.filter(Organization.account_id == user.account_id)
+    orgs = query.all()
     return [
         OrgResponse(id=str(o.id), name=o.name, reporting_currency=o.reporting_currency)
         for o in orgs

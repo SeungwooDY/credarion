@@ -13,13 +13,15 @@ from decimal import Decimal
 
 import anthropic
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import desc, func
+from sqlalchemy.orm import Session
 
+from app.auth_deps import authorize_org, get_current_user
 from app.config import settings
-from app.db import SessionLocal
+from app.db import SessionLocal, get_db
 from app.models import (
     ERPRecord,
     Invoice,
@@ -29,6 +31,7 @@ from app.models import (
     StatementLineItem,
     Supplier,
     SupplierStatement,
+    User,
 )
 
 logger = logging.getLogger(__name__)
@@ -272,10 +275,15 @@ def _load_db_context(org_id: str | None) -> str:
 
 
 @router.post("/ask")
-async def chat_ask(req: ChatRequest):
+async def chat_ask(
+    req: ChatRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     if not settings.anthropic_api_key:
         raise HTTPException(status_code=503, detail="Anthropic API key not configured")
 
+    authorize_org(db, user, req.org_id)
     context_block = _load_db_context(req.org_id)
 
     messages: list[dict] = []

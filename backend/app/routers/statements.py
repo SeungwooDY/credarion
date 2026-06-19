@@ -11,12 +11,20 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.auth_deps import authorize_org, authorize_supplier, get_current_user
 from app.db import get_db
 from app.ingestion.cleaning import normalize_po_number
 from app.ingestion.column_mapping import try_alias_mapping
 from app.ingestion.header_detection import clean_header_cells, detect_header_row
 from app.ingestion.statement_ingestor import IngestionResult, ingest_supplier_statement
-from app.models import ERPRecord, StatementLineItem, Supplier, SupplierColumnMapping, SupplierStatement
+from app.models import (
+    ERPRecord,
+    StatementLineItem,
+    Supplier,
+    SupplierColumnMapping,
+    SupplierStatement,
+    User,
+)
 
 router = APIRouter(prefix="/api/v1/statements", tags=["statements"])
 
@@ -85,6 +93,7 @@ async def preview_statement(
     file: UploadFile = File(...),
     org_id: uuid.UUID = Form(...),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> PreviewResponse:
     """Preview a statement file before uploading.
 
@@ -92,6 +101,7 @@ async def preview_statement(
     the top rows, attempts to match to an existing supplier, detects the
     period, and returns a preview of the first few data rows.
     """
+    authorize_org(db, user, org_id)
     suffix = "." + file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else ".xlsx"
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         shutil.copyfileobj(file.file, tmp)
@@ -180,8 +190,10 @@ async def check_existing(
     supplier_id: uuid.UUID = Query(...),
     period: str = Query(...),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> ExistingStatementInfo | None:
     """Check if a statement already exists for this supplier+period."""
+    authorize_supplier(db, user, supplier_id)
     existing = _find_existing(supplier_id, period, db)
     if not existing:
         return None
@@ -195,6 +207,7 @@ async def upload_statement(
     period: str = Form(...),
     replace: bool = Form(False),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> IngestionResponse:
     """Upload a supplier statement file for ingestion.
 
@@ -207,6 +220,7 @@ async def upload_statement(
 
     Returns 201 on success, 202 if column mapping needs human review.
     """
+    authorize_supplier(db, user, supplier_id)
     existing = _find_existing(supplier_id, period, db)
     if existing and not replace:
         raise HTTPException(

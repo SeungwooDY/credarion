@@ -7,10 +7,27 @@ import useSWR, { type SWRConfiguration } from "swr";
 
 const API_BASE = "/api/v1";
 
+/**
+ * Bounce the browser to the login page when the session is missing/expired.
+ * Guards against redirect loops by ignoring calls already on /login.
+ */
+function redirectToLogin() {
+  if (typeof window === "undefined") return;
+  if (window.location.pathname === "/login") return;
+  const next = encodeURIComponent(
+    window.location.pathname + window.location.search,
+  );
+  window.location.assign(`/login?next=${next}`);
+}
+
 /** Default fetcher: prepends API_BASE, throws on non-ok responses. */
 export async function fetcher<T = unknown>(path: string): Promise<T> {
   const url = path.startsWith("/api/") ? path : `${API_BASE}${path}`;
-  const res = await fetch(url);
+  const res = await fetch(url, { credentials: "include" });
+  if (res.status === 401) {
+    redirectToLogin();
+    throw new Error("Not authenticated");
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(body.detail || `API error ${res.status}`);
@@ -30,6 +47,51 @@ interface Org {
   id: string;
   name: string;
   reporting_currency: string;
+}
+
+export interface Me {
+  id: string;
+  email: string;
+  full_name: string | null;
+  is_superuser: boolean;
+  account: {
+    id: string;
+    name: string;
+    plan: string;
+    subscription_status: string;
+  };
+  organizations: Org[];
+}
+
+/** Current authenticated user + their account and accessible organizations. */
+export function useMe() {
+  const { data, error, isLoading, mutate } = useSWR<Me>(
+    "/auth/me",
+    fetcher,
+    { ...swrDefaults, shouldRetryOnError: false },
+  );
+  return {
+    me: data ?? null,
+    meLoading: isLoading,
+    meError: error,
+    refreshMe: () => mutate(),
+  };
+}
+
+/**
+ * The logged-in user's organization. Since each user belongs to one account
+ * and (for now) operates a single entity, this is just the first org returned
+ * by /auth/me — there is no org picker anymore.
+ */
+export function useCurrentOrg() {
+  const { me, meLoading } = useMe();
+  const org = me?.organizations?.[0] ?? null;
+  return {
+    orgId: org?.id ?? "",
+    org,
+    orgName: org?.name ?? "",
+    orgLoading: meLoading,
+  };
 }
 
 export function useOrgs() {

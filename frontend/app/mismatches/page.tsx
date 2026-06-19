@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import PageHeader from "../components/page-header";
 import StatusBadge from "../components/status-badge";
 import SpreadsheetGrid, { type GridColumn, type GridRow } from "../components/spreadsheet-grid";
-import { useOrgs, useMismatches } from "../lib/swr";
+import { useCurrentOrg, useMismatches } from "../lib/swr";
 import { RippleButton } from "@/components/ui/multi-type-ripple-buttons";
 
 interface SideRecord {
@@ -899,17 +899,12 @@ function SpreadsheetView({
 // ── Main page ──
 
 export default function MismatchesPage() {
-  const { orgs } = useOrgs();
-  const [orgId, setOrgId] = useState("");
+  const { orgId } = useCurrentOrg();
   const [period, setPeriod] = useState("2026-03");
   const { data, mismatchesLoading: loading, mismatchesError, refreshMismatches } = useMismatches(orgId, period);
   const error = mismatchesError?.message ?? "";
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<ViewMode>("review");
-
-  useEffect(() => {
-    if (orgs.length > 0 && !orgId) setOrgId(orgs[0].id);
-  }, [orgs, orgId]);
 
 
   function toggleExpand(supplierId: string) {
@@ -949,18 +944,6 @@ export default function MismatchesPage() {
 
       {/* Controls */}
       <div className="flex gap-4 items-end mb-6">
-        <div>
-          <label className="block text-xs font-medium mb-1">Organization</label>
-          <select
-            value={orgId}
-            onChange={(e) => setOrgId(e.target.value)}
-            className="border border-border rounded-lg px-3 py-2 text-sm bg-card focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
-          >
-            {orgs.map((o) => (
-              <option key={o.id} value={o.id}>{o.name}</option>
-            ))}
-          </select>
-        </div>
         <div>
           <label className="block text-xs font-medium mb-1">Period</label>
           <input

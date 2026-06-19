@@ -7,6 +7,7 @@ from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
 
+from app.auth_deps import authorize_org, get_current_user
 from app.config import settings
 from app.db import get_db
 from app.invoicing.file_storage import get_file_path, save_upload
@@ -22,7 +23,7 @@ from app.invoicing.schemas import (
     StatusTransition,
 )
 from app.invoicing.supplier_matcher import match_supplier
-from app.models import Invoice, InvoiceLineItem
+from app.models import Invoice, InvoiceLineItem, User
 
 router = APIRouter(prefix="/api/v1/invoices", tags=["invoices"])
 
@@ -136,11 +137,13 @@ async def upload_invoices(
 async def extract_invoice_data(
     invoice_id: uuid.UUID,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> InvoiceDetail:
     """Trigger OCR extraction on an uploaded invoice."""
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    authorize_org(db, user, invoice.org_id)
 
     if invoice.status not in ("received", "extracted"):
         raise HTTPException(
@@ -252,11 +255,13 @@ def list_invoices(
 def get_invoice(
     invoice_id: uuid.UUID,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> InvoiceDetail:
     """Get invoice detail with nested line items."""
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    authorize_org(db, user, invoice.org_id)
     return _invoice_to_detail(invoice)
 
 
@@ -265,11 +270,13 @@ def update_invoice(
     invoice_id: uuid.UUID,
     body: InvoiceUpdate,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> InvoiceDetail:
     """Update extracted fields (manual correction)."""
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    authorize_org(db, user, invoice.org_id)
 
     update_data = body.model_dump(exclude_unset=True)
     for field_name, value in update_data.items():
@@ -291,11 +298,13 @@ def transition_status(
     invoice_id: uuid.UUID,
     body: StatusTransition,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> InvoiceDetail:
     """Transition invoice status with validation."""
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    authorize_org(db, user, invoice.org_id)
 
     allowed = ALLOWED_TRANSITIONS.get(invoice.status, [])
     if body.status not in allowed:
@@ -315,11 +324,13 @@ def transition_status(
 def get_line_items(
     invoice_id: uuid.UUID,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> list[InvoiceLineItemDetail]:
     """Get line items for an invoice."""
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    authorize_org(db, user, invoice.org_id)
     items = db.query(InvoiceLineItem).filter(InvoiceLineItem.invoice_id == invoice_id).all()
     return [_line_item_to_detail(li) for li in items]
 
@@ -330,8 +341,14 @@ def update_line_item(
     line_id: uuid.UUID,
     body: InvoiceLineItemUpdate,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> InvoiceLineItemDetail:
     """Update a specific line item."""
+    invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    authorize_org(db, user, invoice.org_id)
+
     li = (
         db.query(InvoiceLineItem)
         .filter(InvoiceLineItem.id == line_id, InvoiceLineItem.invoice_id == invoice_id)

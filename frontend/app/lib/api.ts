@@ -5,16 +5,32 @@
 
 const API_BASE = "/api/v1";
 
+/** Redirect to login on an expired/missing session (browser only). */
+function handleUnauthorized() {
+  if (typeof window === "undefined") return;
+  if (window.location.pathname === "/login") return;
+  const next = encodeURIComponent(
+    window.location.pathname + window.location.search,
+  );
+  window.location.assign(`/login?next=${next}`);
+}
+
 export async function apiFetch<T = unknown>(
   path: string,
   init?: RequestInit
 ): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
+    credentials: "include",
     ...init,
     headers: {
       ...init?.headers,
     },
   });
+
+  if (res.status === 401) {
+    handleUnauthorized();
+    throw new Error("Not authenticated");
+  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
@@ -54,8 +70,14 @@ export async function apiUpload<T = unknown>(
 ): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
+    credentials: "include",
     body: formData,
   });
+
+  if (res.status === 401) {
+    handleUnauthorized();
+    throw new Error("Not authenticated");
+  }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ detail: res.statusText }));
