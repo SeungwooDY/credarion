@@ -1,0 +1,40 @@
+# Render Blueprint: deploys the FastAPI backend + Next.js frontend as two
+# web services from this monorepo. In the Render dashboard:
+#   New > Blueprint > pick this repo + branch > fill in the secret env vars.
+services:
+  # --- Backend (FastAPI) ---
+  - type: web
+    name: credarion-backend
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install .
+    preDeployCommand: alembic upgrade head
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: AUTH_COOKIE_SECURE
+        value: "true"
+      - key: AUTH_SECRET_KEY
+        generateValue: true        # Render generates a strong random secret
+      - key: DATABASE_URL
+        sync: false                # paste your Supabase URL in the dashboard
+      - key: ANTHROPIC_API_KEY
+        sync: false                # paste your Anthropic key in the dashboard
+
+  # --- Frontend (Next.js) ---
+  - type: web
+    name: credarion-frontend
+    runtime: node
+    rootDir: frontend
+    plan: free
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    envVars:
+      # Full URL (with https://) of the backend service. Render's fromService
+      # only exposes a bare host, so set this explicitly in the dashboard once
+      # the backend is deployed — it'll be https://credarion-backend.onrender.com
+      # (or whatever URL Render assigns the backend service).
+      - key: BACKEND_URL
+        sync: false
