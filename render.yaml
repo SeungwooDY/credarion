@@ -7,10 +7,11 @@ services:
     name: credarion-backend
     runtime: python
     rootDir: backend
-    plan: free
-    # Free tier doesn't support preDeployCommand, so run migrations in the
-    # build step (Render exposes env vars like DATABASE_URL at build time).
-    buildCommand: pip install . && alembic upgrade head
+    plan: starter        # paid instance type — does not sleep
+    buildCommand: pip install .
+    # Apply DB migrations once per deploy, after build and before traffic shifts.
+    # (preDeployCommand requires a paid plan, which we're now on.)
+    preDeployCommand: alembic upgrade head
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: APP_ENV
@@ -29,7 +30,7 @@ services:
     name: credarion-frontend
     runtime: node
     rootDir: frontend
-    plan: free
+    plan: starter        # paid instance type — does not sleep
     buildCommand: npm install && npm run build
     startCommand: npm start
     envVars:
