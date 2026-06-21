@@ -22,16 +22,22 @@ from app.models import (
 )
 from app.reconciliation.orchestrator import run_reconciliation
 from app.reconciliation.schemas import (
+    ApproveRequest,
     BulkResolveRequest,
     ConfigResponse,
     ConfigUpdate,
     ReconciliationRunRequest,
     ReconciliationRunResponse,
+    RejectRequest,
     ResolveRequest,
     ResultDetail,
+    ReviewActionResponse,
     RunSummary,
     SupplierReconciliationSummary,
 )
+
+# Statuses that count as already-reviewed (cannot be re-approved/re-rejected).
+_REVIEWED_STATUSES = {"confirmed", "rejected"}
 
 router = APIRouter(prefix="/api/v1/reconciliation", tags=["reconciliation"])
 
@@ -84,6 +90,13 @@ def _result_to_detail(r: ReconciliationResult) -> ResultDetail:
         discrepancy_type=r.discrepancy_type,
         confidence=float(r.confidence) if r.confidence is not None else None,
         status=r.status,
+        confidence_score=r.confidence_score if r.confidence_score is not None else 0,
+        confidence_label=r.confidence_label,
+        sort_priority=r.sort_priority if r.sort_priority is not None else 99,
+        discrepancy_note=r.discrepancy_note,
+        amount=(r.match_details or {}).get("amount"),
+        reviewer_id=r.reviewer_id,
+        reviewed_at=r.reviewed_at,
         resolution_note=r.resolution_note,
         resolved_by=r.resolved_by,
         resolved_at=r.resolved_at,
@@ -155,6 +168,36 @@ async def list_suppliers_with_readiness(
         if r.supplier_id not in latest_runs:
             latest_runs[r.supplier_id] = r
 
+    # Bulk query: review-status breakdown per supplier (latest run only).
+    from collections import defaultdict
+
+    run_id_by_supplier = {sid: run.id for sid, run in latest_runs.items()}
+    latest_run_ids = list(run_id_by_supplier.values())
+    status_by_run: dict[Any, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    near_exact_by_run: dict[Any, int] = defaultdict(int)
+    if latest_run_ids:
+        for rid, st, cnt in (
+            db.query(
+                ReconciliationResult.run_id,
+                ReconciliationResult.status,
+                func.count(ReconciliationResult.id),
+            )
+            .filter(ReconciliationResult.run_id.in_(latest_run_ids))
+            .group_by(ReconciliationResult.run_id, ReconciliationResult.status)
+            .all()
+        ):
+            status_by_run[rid][st] = cnt
+        for rid, cnt in (
+            db.query(ReconciliationResult.run_id, func.count(ReconciliationResult.id))
+            .filter(
+                ReconciliationResult.run_id.in_(latest_run_ids),
+                ReconciliationResult.match_type == "near_exact",
+            )
+            .group_by(ReconciliationResult.run_id)
+            .all()
+        ):
+            near_exact_by_run[rid] = cnt
+
     # Build result from suppliers that have any data
     supplier_ids_with_data = set(erp_counts.keys()) | set(stmt_counts.keys())
     suppliers = (
@@ -169,6 +212,9 @@ async def list_suppliers_with_readiness(
         stmt_rows = stmt_counts.get(s.id, 0)
         latest_run = latest_runs.get(s.id)
 
+        rid = run_id_by_supplier.get(s.id)
+        sc = status_by_run.get(rid, {})
+
         result.append({
             "id": str(s.id),
             "name": s.name,
@@ -180,6 +226,14 @@ async def list_suppliers_with_readiness(
             "ready": erp_count > 0 and stmt_rows > 0,
             "last_match_rate": float(latest_run.auto_match_rate) if latest_run and latest_run.auto_match_rate is not None else None,
             "last_run_status": latest_run.status if latest_run else None,
+            # Review-queue breakdown for the latest run (0 if no run yet).
+            "total_lines": sum(sc.values()),
+            "pending_review": sc.get("pending_review", 0),
+            "confirmed": sc.get("confirmed", 0),
+            "rejected": sc.get("rejected", 0),
+            "unmatched": sc.get("unmatched", 0),
+            "near_exact_count": near_exact_by_run.get(rid, 0),
+            "has_near_exact": near_exact_by_run.get(rid, 0) > 0,
         })
 
     # Sort: ready first, then by name
@@ -407,8 +461,10 @@ async def export_results(
     """Download discrepancy report as Excel or CSV."""
     import pandas as pd
 
+    # Export everything carrying a discrepancy (near_exact, unmatched, or any
+    # layer match with nonzero deltas), regardless of review status.
     q = db.query(ReconciliationResult).filter(
-        ReconciliationResult.status.in_(["discrepancy", "resolved"])
+        ReconciliationResult.discrepancy_type.isnot(None)
     )
     if run_id:
         q = q.filter(ReconciliationResult.run_id == run_id)
@@ -501,7 +557,7 @@ async def list_mismatches(
         db.query(ReconciliationResult)
         .filter(
             ReconciliationResult.run_id.in_(run_ids),
-            ReconciliationResult.status.in_(["discrepancy", "resolved"]),
+            ReconciliationResult.discrepancy_type.isnot(None),
         )
         .all()
     )
@@ -669,3 +725,113 @@ async def update_config(
         ai_layer_enabled=config.ai_layer_enabled,
         ai_max_tokens_per_run=config.ai_max_tokens_per_run,
     )
+
+
+# --- Human review queue ------------------------------------------------------
+#
+# NOTE: the routes below use bare path params ({supplier_id}/{period} and
+# {result_id}/...). They are declared LAST so FastAPI matches the literal
+# routes above (/runs/..., /results/..., /config/...) first and these only
+# catch genuine UUID/period paths.
+
+
+@router.post("/{result_id}/approve", response_model=ReviewActionResponse)
+async def approve_result(
+    result_id: uuid.UUID,
+    body: ApproveRequest,
+    db: Session = Depends(get_db),
+) -> ReviewActionResponse:
+    """Confirm a matched result during human review.
+
+    Sets status='confirmed', records the reviewer and timestamp.
+    409 if the result was already confirmed/rejected; 404 if not found.
+    """
+    r = db.query(ReconciliationResult).filter(ReconciliationResult.id == result_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Result not found")
+    if r.status in _REVIEWED_STATUSES:
+        raise HTTPException(
+            status_code=409, detail=f"Result already {r.status}"
+        )
+
+    r.status = "confirmed"
+    r.reviewer_id = body.reviewer_id
+    r.reviewed_at = datetime.utcnow()
+    if body.note:
+        r.resolution_note = body.note
+    db.commit()
+    return ReviewActionResponse(id=str(r.id), status="confirmed")
+
+
+@router.post("/{result_id}/reject", response_model=ReviewActionResponse)
+async def reject_result(
+    result_id: uuid.UUID,
+    body: RejectRequest,
+    db: Session = Depends(get_db),
+) -> ReviewActionResponse:
+    """Flag a result as a discrepancy during human review.
+
+    Requires a non-empty reason (stored in discrepancy_note). Sets
+    status='rejected', records reviewer + timestamp.
+    400 if reason is empty; 409 if already confirmed/rejected; 404 if not found.
+    """
+    reason = (body.reason or "").strip()
+    if not reason:
+        raise HTTPException(status_code=400, detail="A rejection reason is required")
+
+    r = db.query(ReconciliationResult).filter(ReconciliationResult.id == result_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Result not found")
+    if r.status in _REVIEWED_STATUSES:
+        raise HTTPException(
+            status_code=409, detail=f"Result already {r.status}"
+        )
+
+    r.status = "rejected"
+    r.reviewer_id = body.reviewer_id
+    r.reviewed_at = datetime.utcnow()
+    r.discrepancy_note = reason
+    db.commit()
+    return ReviewActionResponse(id=str(r.id), status="rejected")
+
+
+@router.get("/{supplier_id}/{period}", response_model=list[ResultDetail])
+async def review_queue(
+    supplier_id: uuid.UUID,
+    period: str,
+    db: Session = Depends(get_db),
+) -> list[ResultDetail]:
+    """Human review queue for a supplier+period (latest run).
+
+    Sorted by sort_priority ASC (highest confidence first), then amount DESC
+    (largest value items first) within each confidence group.
+    """
+    latest_run = (
+        db.query(ReconciliationRun)
+        .filter(
+            ReconciliationRun.supplier_id == supplier_id,
+            ReconciliationRun.period == period,
+        )
+        .order_by(desc(ReconciliationRun.started_at))
+        .first()
+    )
+    if not latest_run:
+        return []
+
+    results = (
+        db.query(ReconciliationResult)
+        .filter(ReconciliationResult.run_id == latest_run.id)
+        .all()
+    )
+
+    def _amount(r: ReconciliationResult) -> float:
+        amt = (r.match_details or {}).get("amount")
+        return float(amt) if amt is not None else 0.0
+
+    results.sort(
+        key=lambda r: (
+            r.sort_priority if r.sort_priority is not None else 99,
+            -_amount(r),
+        )
+    )
+    return [_result_to_detail(r) for r in results]

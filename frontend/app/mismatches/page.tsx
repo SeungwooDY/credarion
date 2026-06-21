@@ -6,6 +6,8 @@ import StatusBadge from "../components/status-badge";
 import SpreadsheetGrid, { type GridColumn, type GridRow } from "../components/spreadsheet-grid";
 import { useOrgs, useMismatches } from "../lib/swr";
 import { RippleButton } from "@/components/ui/multi-type-ripple-buttons";
+import { CARD } from "@/app/lib/ui";
+import { useT, type TFunction } from "@/app/lib/i18n";
 
 interface SideRecord {
   po_number: string | null;
@@ -65,43 +67,44 @@ function formatCurrency(n: number | null | undefined): string {
 }
 
 function DiscrepancyLabel({ type }: { type: string | null }) {
+  const t = useT();
   if (!type) return <span className="text-zinc-300">-</span>;
 
   const labels: Record<string, { text: string; color: string; explanation: string }> = {
     missing_from_erp: {
-      text: "Not in ERP",
+      text: t("mismatches.disc_missing_from_erp"),
       color: "text-red-600 bg-red-50 border border-red-200",
-      explanation: "Supplier claims this delivery, but no matching record found in ERP",
+      explanation: t("mismatches.disc_missing_from_erp_explain"),
     },
     missing_from_statement: {
-      text: "Not in Statement",
+      text: t("mismatches.disc_missing_from_statement"),
       color: "text-amber-600 bg-amber-50 border border-amber-200",
-      explanation: "ERP has this record, but supplier did not include it in their statement",
+      explanation: t("mismatches.disc_missing_from_statement_explain"),
     },
     quantity_over: {
-      text: "Qty Over",
+      text: t("mismatches.disc_qty_over"),
       color: "text-orange-600 bg-orange-50 border border-orange-200",
-      explanation: "Supplier claims more quantity than ERP shows",
+      explanation: t("mismatches.disc_qty_over_explain"),
     },
     quantity_under: {
-      text: "Qty Under",
+      text: t("mismatches.disc_qty_under"),
       color: "text-orange-600 bg-orange-50 border border-orange-200",
-      explanation: "Supplier claims less quantity than ERP shows",
+      explanation: t("mismatches.disc_qty_under_explain"),
     },
     price_higher: {
-      text: "Price Higher",
+      text: t("mismatches.disc_price_higher"),
       color: "text-purple-600 bg-purple-50 border border-purple-200",
-      explanation: "Supplier price is higher than the ERP/PO price",
+      explanation: t("mismatches.disc_price_higher_explain"),
     },
     price_lower: {
-      text: "Price Lower",
+      text: t("mismatches.disc_price_lower"),
       color: "text-purple-600 bg-purple-50 border border-purple-200",
-      explanation: "Supplier price is lower than the ERP/PO price",
+      explanation: t("mismatches.disc_price_lower_explain"),
     },
     amount_mismatch: {
-      text: "Amount Mismatch",
+      text: t("mismatches.disc_amount_mismatch"),
       color: "text-blue-600 bg-blue-50 border border-blue-200",
-      explanation: "Total amount does not match between ERP and statement",
+      explanation: t("mismatches.disc_amount_mismatch_explain"),
     },
   };
 
@@ -129,17 +132,18 @@ function DiscrepancyLabel({ type }: { type: string | null }) {
 }
 
 function MatchExplanation({ supplier }: { supplier: SupplierMismatch }) {
+  const t = useT();
   const s = supplier;
   const matchedCount = s.total_statement - s.unmatched_stmt;
   const matchPct = s.match_rate ?? 0;
 
   return (
     <div className="px-4 py-3 bg-zinc-50 border-t border-border text-xs text-zinc-600 space-y-2">
-      <div className="font-medium text-zinc-700 text-sm">Match Summary</div>
+      <div className="font-medium text-zinc-700 text-sm">{t("mismatches.match_summary")}</div>
 
       <div className="grid grid-cols-3 gap-4">
         <div>
-          <div className="text-zinc-400 mb-0.5">Statement items matched</div>
+          <div className="text-zinc-400 mb-0.5">{t("mismatches.statement_items_matched")}</div>
           <div className="font-mono text-sm">
             <span className="font-semibold text-green-600">{matchedCount}</span>
             <span className="text-zinc-400"> / {s.total_statement}</span>
@@ -149,11 +153,11 @@ function MatchExplanation({ supplier }: { supplier: SupplierMismatch }) {
           </div>
         </div>
         <div>
-          <div className="text-zinc-400 mb-0.5">ERP records for period</div>
+          <div className="text-zinc-400 mb-0.5">{t("mismatches.erp_records_for_period")}</div>
           <div className="font-mono text-sm">{s.total_erp}</div>
         </div>
         <div>
-          <div className="text-zinc-400 mb-0.5">Total issues to review</div>
+          <div className="text-zinc-400 mb-0.5">{t("mismatches.total_issues_to_review")}</div>
           <div className="font-mono text-sm font-semibold text-red-500">{s.total_mismatches}</div>
         </div>
       </div>
@@ -163,8 +167,8 @@ function MatchExplanation({ supplier }: { supplier: SupplierMismatch }) {
           <div className="flex items-start gap-2 bg-red-50 rounded px-2.5 py-1.5 border border-red-100">
             <span className="font-semibold text-red-600 shrink-0">{s.unmatched_stmt}</span>
             <span>
-              <span className="font-medium text-red-700">items in supplier statement have no matching ERP record.</span>
-              {" "}The supplier claims these deliveries but your ERP system has no corresponding receipt.
+              <span className="font-medium text-red-700">{t("mismatches.unmatched_stmt_label")}</span>
+              {" "}{t("mismatches.unmatched_stmt_detail")}
             </span>
           </div>
         )}
@@ -172,8 +176,8 @@ function MatchExplanation({ supplier }: { supplier: SupplierMismatch }) {
           <div className="flex items-start gap-2 bg-amber-50 rounded px-2.5 py-1.5 border border-amber-100">
             <span className="font-semibold text-amber-600 shrink-0">{s.unmatched_erp}</span>
             <span>
-              <span className="font-medium text-amber-700">ERP records not included in supplier statement.</span>
-              {" "}Your ERP shows these receipts but the supplier did not claim them.
+              <span className="font-medium text-amber-700">{t("mismatches.unmatched_erp_label")}</span>
+              {" "}{t("mismatches.unmatched_erp_detail")}
             </span>
           </div>
         )}
@@ -181,8 +185,8 @@ function MatchExplanation({ supplier }: { supplier: SupplierMismatch }) {
           <div className="flex items-start gap-2 bg-orange-50 rounded px-2.5 py-1.5 border border-orange-100">
             <span className="font-semibold text-orange-600 shrink-0">{s.qty_issues}</span>
             <span>
-              <span className="font-medium text-orange-700">quantity discrepancies.</span>
-              {" "}The PO and part number matched, but quantities differ between ERP and supplier statement.
+              <span className="font-medium text-orange-700">{t("mismatches.qty_issues_label")}</span>
+              {" "}{t("mismatches.qty_issues_detail")}
             </span>
           </div>
         )}
@@ -190,8 +194,8 @@ function MatchExplanation({ supplier }: { supplier: SupplierMismatch }) {
           <div className="flex items-start gap-2 bg-purple-50 rounded px-2.5 py-1.5 border border-purple-100">
             <span className="font-semibold text-purple-600 shrink-0">{s.price_issues}</span>
             <span>
-              <span className="font-medium text-purple-700">price discrepancies.</span>
-              {" "}Unit prices differ between ERP and supplier statement for matched items.
+              <span className="font-medium text-purple-700">{t("mismatches.price_issues_label")}</span>
+              {" "}{t("mismatches.price_issues_detail")}
             </span>
           </div>
         )}
@@ -209,6 +213,7 @@ function ResolveModal({
   onClose: () => void;
   onResolved: (resolvedIds: string[]) => void;
 }) {
+  const t = useT();
   const [note, setNote] = useState("");
   const [resolvedBy, setResolvedBy] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -255,25 +260,27 @@ function ResolveModal({
     <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onClose}>
       <div className="bg-card rounded-2xl shadow-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
         <h3 className="font-semibold text-sm mb-3">
-          Resolve {items.length === 1 ? "Item" : `${items.length} Items`}
+          {items.length === 1
+            ? t("mismatches.resolve_item")
+            : t("mismatches.resolve_n_items", { n: items.length })}
         </h3>
         <div className="space-y-3">
           <div>
-            <label className="block text-xs font-medium text-zinc-500 mb-1">Resolution Note</label>
+            <label className="block text-xs font-medium text-zinc-500 mb-1">{t("mismatches.resolution_note")}</label>
             <textarea
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="e.g., Confirmed with supplier — late delivery, will appear next month"
+              placeholder={t("mismatches.resolution_note_placeholder")}
               className="w-full border border-border rounded-lg px-3 py-2 text-sm h-20 resize-none focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-zinc-500 mb-1">Resolved By (optional)</label>
+            <label className="block text-xs font-medium text-zinc-500 mb-1">{t("mismatches.resolved_by")}</label>
             <input
               type="text"
               value={resolvedBy}
               onChange={(e) => setResolvedBy(e.target.value)}
-              placeholder="Your name"
+              placeholder={t("mismatches.resolved_by_placeholder")}
               className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
             />
           </div>
@@ -283,7 +290,7 @@ function ResolveModal({
             onClick={onClose}
             className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted transition-colors"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <RippleButton
             variant="hover"
@@ -294,7 +301,7 @@ function ResolveModal({
           >
             <span className="flex items-center gap-1.5">
               <span aria-hidden>✓</span>
-              {submitting ? "Resolving..." : "Mark as Resolved"}
+              {submitting ? t("mismatches.resolving") : t("mismatches.mark_as_resolved")}
             </span>
           </RippleButton>
         </div>
@@ -314,6 +321,7 @@ function SupplierCard({
   onToggle: () => void;
   onItemsResolved: (resolvedIds: string[]) => void;
 }) {
+  const t = useT();
   const s = supplier;
   const [filter, setFilter] = useState<FilterType>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -355,7 +363,7 @@ function SupplierCard({
   }
 
   return (
-    <div className="bg-card rounded-2xl shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
+    <div className={`${CARD} overflow-hidden`}>
       {/* Header */}
       <button
         onClick={onToggle}
@@ -378,22 +386,22 @@ function SupplierCard({
 
         <div className="flex gap-6 items-center text-xs shrink-0">
           <div className="text-center">
-            <div className="text-zinc-400">Match Rate</div>
+            <div className="text-zinc-400">{t("mismatches.match_rate")}</div>
             <div className={`font-semibold text-sm ${matchColor}`}>
               {s.match_rate != null ? `${s.match_rate.toFixed(1)}%` : "-"}
             </div>
           </div>
           <div className="text-center">
-            <div className="text-zinc-400">Issues</div>
+            <div className="text-zinc-400">{t("mismatches.issues")}</div>
             <div className="font-semibold text-sm">
               <span className="text-red-500">{s.total_mismatches - resolvedCount}</span>
               {resolvedCount > 0 && (
-                <span className="text-green-500 ml-1">({resolvedCount} resolved)</span>
+                <span className="text-green-500 ml-1">({t("mismatches.n_resolved", { n: resolvedCount })})</span>
               )}
             </div>
           </div>
           <div className="text-center">
-            <div className="text-zinc-400">ERP / Stmt</div>
+            <div className="text-zinc-400">{t("mismatches.erp_stmt")}</div>
             <div className="font-mono text-sm">{s.total_erp} / {s.total_statement}</div>
           </div>
         </div>
@@ -401,22 +409,22 @@ function SupplierCard({
         <div className="flex gap-1.5 shrink-0">
           {s.unmatched_stmt > 0 && (
             <span className="px-2 py-0.5 rounded text-xs bg-red-50 text-red-600 border border-red-200">
-              {s.unmatched_stmt} not in ERP
+              {t("mismatches.badge_not_in_erp", { n: s.unmatched_stmt })}
             </span>
           )}
           {s.unmatched_erp > 0 && (
             <span className="px-2 py-0.5 rounded text-xs bg-amber-50 text-amber-600 border border-amber-200">
-              {s.unmatched_erp} not in stmt
+              {t("mismatches.badge_not_in_stmt", { n: s.unmatched_erp })}
             </span>
           )}
           {s.qty_issues > 0 && (
             <span className="px-2 py-0.5 rounded text-xs bg-orange-50 text-orange-600 border border-orange-200">
-              {s.qty_issues} qty
+              {t("mismatches.badge_qty", { n: s.qty_issues })}
             </span>
           )}
           {s.price_issues > 0 && (
             <span className="px-2 py-0.5 rounded text-xs bg-purple-50 text-purple-600 border border-purple-200">
-              {s.price_issues} price
+              {t("mismatches.badge_price", { n: s.price_issues })}
             </span>
           )}
         </div>
@@ -431,12 +439,12 @@ function SupplierCard({
           <div className="px-4 py-2 border-t border-border flex items-center justify-between bg-card">
             <div className="flex gap-1">
               {([
-                ["all", `All (${s.items.length})`],
-                ["missing_from_erp", `Not in ERP (${s.unmatched_stmt})`],
-                ["missing_from_statement", `Not in Stmt (${s.unmatched_erp})`],
-                ["quantity", `Qty (${s.qty_issues})`],
-                ["price", `Price (${s.price_issues})`],
-                ["resolved", `Resolved (${resolvedCount})`],
+                ["all", `${t("mismatches.filter_all")} (${s.items.length})`],
+                ["missing_from_erp", `${t("mismatches.filter_not_in_erp")} (${s.unmatched_stmt})`],
+                ["missing_from_statement", `${t("mismatches.filter_not_in_stmt")} (${s.unmatched_erp})`],
+                ["quantity", `${t("mismatches.filter_qty")} (${s.qty_issues})`],
+                ["price", `${t("mismatches.filter_price")} (${s.price_issues})`],
+                ["resolved", `${t("mismatches.filter_resolved")} (${resolvedCount})`],
               ] as [FilterType, string][])
                 .filter(([key]) => {
                   if (key === "all") return true;
@@ -471,7 +479,7 @@ function SupplierCard({
                   }}
                   className="px-3 py-1 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
                 >
-                  Resolve {selected.size} selected
+                  {t("mismatches.resolve_n_selected", { n: selected.size })}
                 </button>
               )}
               {unresolvedItems.length > 0 && selected.size === 0 && (
@@ -479,7 +487,7 @@ function SupplierCard({
                   onClick={selectAllUnresolved}
                   className="px-2.5 py-1 text-xs text-zinc-500 hover:text-zinc-700"
                 >
-                  Select all unresolved
+                  {t("mismatches.select_all_unresolved")}
                 </button>
               )}
               {selected.size > 0 && (
@@ -487,7 +495,7 @@ function SupplierCard({
                   onClick={() => setSelected(new Set())}
                   className="px-2.5 py-1 text-xs text-zinc-500 hover:text-zinc-700"
                 >
-                  Clear
+                  {t("mismatches.clear")}
                 </button>
               )}
             </div>
@@ -509,17 +517,17 @@ function SupplierCard({
                       className="rounded"
                     />
                   </th>
-                  <th className="text-left px-3 py-2 font-medium">Issue</th>
-                  <th className="text-left px-3 py-2 font-medium">PO</th>
-                  <th className="text-left px-3 py-2 font-medium">Part Number</th>
-                  <th className="text-right px-3 py-2 font-medium">ERP Qty</th>
-                  <th className="text-right px-3 py-2 font-medium">Stmt Qty</th>
-                  <th className="text-right px-3 py-2 font-medium">Qty Delta</th>
-                  <th className="text-right px-3 py-2 font-medium">ERP Amt</th>
-                  <th className="text-right px-3 py-2 font-medium">Stmt Amt</th>
-                  <th className="text-right px-3 py-2 font-medium">Amt Delta</th>
-                  <th className="text-center px-3 py-2 font-medium">Status</th>
-                  <th className="text-center px-3 py-2 font-medium w-20">Action</th>
+                  <th className="text-left px-3 py-2 font-medium">{t("mismatches.col_issue")}</th>
+                  <th className="text-left px-3 py-2 font-medium">{t("mismatches.col_po")}</th>
+                  <th className="text-left px-3 py-2 font-medium">{t("mismatches.col_part_number")}</th>
+                  <th className="text-right px-3 py-2 font-medium">{t("mismatches.col_erp_qty")}</th>
+                  <th className="text-right px-3 py-2 font-medium">{t("mismatches.col_stmt_qty")}</th>
+                  <th className="text-right px-3 py-2 font-medium">{t("mismatches.col_qty_delta")}</th>
+                  <th className="text-right px-3 py-2 font-medium">{t("mismatches.col_erp_amt")}</th>
+                  <th className="text-right px-3 py-2 font-medium">{t("mismatches.col_stmt_amt")}</th>
+                  <th className="text-right px-3 py-2 font-medium">{t("mismatches.col_amt_delta")}</th>
+                  <th className="text-center px-3 py-2 font-medium">{t("common.status")}</th>
+                  <th className="text-center px-3 py-2 font-medium w-20">{t("common.action")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -595,7 +603,7 @@ function SupplierCard({
                             className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 cursor-help"
                             title={item.resolution_note || ""}
                           >
-                            resolved
+                            {t("mismatches.resolved")}
                           </span>
                         ) : (
                           <StatusBadge status={item.status} />
@@ -607,7 +615,7 @@ function SupplierCard({
                             onClick={() => setResolveItems([item])}
                             className="px-2 py-0.5 text-xs text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
                           >
-                            Resolve
+                            {t("common.resolve")}
                           </button>
                         )}
                       </td>
@@ -620,7 +628,7 @@ function SupplierCard({
 
           {filteredItems.length === 0 && (
             <div className="px-4 py-6 text-center text-xs text-zinc-400">
-              No items match this filter.
+              {t("mismatches.no_items_match_filter")}
             </div>
           )}
         </>
@@ -642,28 +650,30 @@ function SupplierCard({
 
 // ── Spreadsheet View helpers ──
 
-const SPREADSHEET_COLUMNS: GridColumn[] = [
-  { key: "flag", label: "Flag", width: 100, editable: true, type: "select", align: "center", options: [
-    { value: "", label: "-" },
-    { value: "flagged", label: "Flagged", color: "#dc2626" },
-    { value: "approved", label: "Approved", color: "#16a34a" },
-    { value: "query", label: "Query", color: "#d97706" },
-  ]},
-  { key: "discrepancy", label: "Issue", width: 130 },
-  { key: "po_number", label: "PO Number", width: 120 },
-  { key: "part_number", label: "Part Number", width: 150 },
-  { key: "erp_qty", label: "ERP Qty", width: 80, editable: true, type: "number", align: "right" },
-  { key: "stmt_qty", label: "Stmt Qty", width: 80, editable: true, type: "number", align: "right" },
-  { key: "qty_delta", label: "Qty Delta", width: 80, align: "right" },
-  { key: "erp_price", label: "ERP Price", width: 90, editable: true, type: "number", align: "right" },
-  { key: "stmt_price", label: "Stmt Price", width: 90, editable: true, type: "number", align: "right" },
-  { key: "price_delta", label: "Price Delta", width: 90, align: "right" },
-  { key: "erp_amount", label: "ERP Amount", width: 100, editable: true, type: "number", align: "right" },
-  { key: "stmt_amount", label: "Stmt Amount", width: 100, editable: true, type: "number", align: "right" },
-  { key: "amt_delta", label: "Amt Delta", width: 100, align: "right" },
-  { key: "status", label: "Status", width: 90, align: "center" },
-  { key: "notes", label: "Notes", width: 200, editable: true, type: "text" },
-];
+function buildSpreadsheetColumns(t: TFunction): GridColumn[] {
+  return [
+    { key: "flag", label: t("mismatches.col_flag"), width: 100, editable: true, type: "select", align: "center", options: [
+      { value: "", label: "-" },
+      { value: "flagged", label: t("mismatches.flag_flagged"), color: "#dc2626" },
+      { value: "approved", label: t("mismatches.flag_approved"), color: "#16a34a" },
+      { value: "query", label: t("mismatches.flag_query"), color: "#d97706" },
+    ]},
+    { key: "discrepancy", label: t("mismatches.col_issue"), width: 130 },
+    { key: "po_number", label: t("mismatches.col_po_number"), width: 120 },
+    { key: "part_number", label: t("mismatches.col_part_number"), width: 150 },
+    { key: "erp_qty", label: t("mismatches.col_erp_qty"), width: 80, editable: true, type: "number", align: "right" },
+    { key: "stmt_qty", label: t("mismatches.col_stmt_qty"), width: 80, editable: true, type: "number", align: "right" },
+    { key: "qty_delta", label: t("mismatches.col_qty_delta"), width: 80, align: "right" },
+    { key: "erp_price", label: t("mismatches.col_erp_price"), width: 90, editable: true, type: "number", align: "right" },
+    { key: "stmt_price", label: t("mismatches.col_stmt_price"), width: 90, editable: true, type: "number", align: "right" },
+    { key: "price_delta", label: t("mismatches.col_price_delta"), width: 90, align: "right" },
+    { key: "erp_amount", label: t("mismatches.col_erp_amount"), width: 100, editable: true, type: "number", align: "right" },
+    { key: "stmt_amount", label: t("mismatches.col_stmt_amount"), width: 100, editable: true, type: "number", align: "right" },
+    { key: "amt_delta", label: t("mismatches.col_amt_delta"), width: 100, align: "right" },
+    { key: "status", label: t("common.status"), width: 90, align: "center" },
+    { key: "notes", label: t("mismatches.col_notes"), width: 200, editable: true, type: "text" },
+  ];
+}
 
 function supplierToRows(supplier: SupplierMismatch): GridRow[] {
   return supplier.items.map((item) => ({
@@ -745,6 +755,8 @@ function SpreadsheetView({
 }: {
   data: SupplierMismatch[];
 }) {
+  const t = useT();
+  const SPREADSHEET_COLUMNS = buildSpreadsheetColumns(t);
   const [selectedSupplierId, setSelectedSupplierId] = useState(data[0]?.supplier_id ?? "");
   const [editsMap, setEditsMap] = useState<Record<string, Record<string, Record<string, unknown>>>>({});
 
@@ -821,11 +833,11 @@ function SpreadsheetView({
           <span className="text-zinc-300">|</span>
           <span>{selectedSupplier.vendor_code}</span>
           <span className="text-zinc-300">|</span>
-          <span>ERP: <span className="font-mono">{selectedSupplier.total_erp}</span></span>
-          <span>Stmt: <span className="font-mono">{selectedSupplier.total_statement}</span></span>
+          <span>{t("mismatches.erp_label")} <span className="font-mono">{selectedSupplier.total_erp}</span></span>
+          <span>{t("mismatches.stmt_label")} <span className="font-mono">{selectedSupplier.total_statement}</span></span>
           <span className="text-zinc-300">|</span>
           <span className={matchColor(selectedSupplier.match_rate)}>
-            Match rate: <span className="font-semibold">{selectedSupplier.match_rate?.toFixed(1) ?? "-"}%</span>
+            {t("mismatches.match_rate_label")} <span className="font-semibold">{selectedSupplier.match_rate?.toFixed(1) ?? "-"}%</span>
           </span>
         </div>
       )}
@@ -833,17 +845,17 @@ function SpreadsheetView({
       {/* Toolbar */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3 text-xs text-zinc-500">
-          <span>{rows.length} rows</span>
+          <span>{t("mismatches.n_rows", { n: rows.length })}</span>
           {editCount > 0 && (
-            <span className="text-accent font-medium">{editCount} edits</span>
+            <span className="text-accent font-medium">{t("mismatches.n_edits", { n: editCount })}</span>
           )}
           <span className="flex items-center gap-1.5">
             <span className="w-3 h-3 rounded-sm bg-green-50 border border-green-200" />
-            Edited cells
+            {t("mismatches.edited_cells")}
           </span>
           <span className="flex items-center gap-1.5">
             <span className="text-accent text-[9px]">*</span>
-            Editable column
+            {t("mismatches.editable_column")}
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -852,7 +864,7 @@ function SpreadsheetView({
               onClick={() => setEditsMap({})}
               className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted transition-colors text-zinc-600"
             >
-              Reset all edits
+              {t("mismatches.reset_all_edits")}
             </button>
           )}
           {editCount > 0 && (
@@ -864,7 +876,7 @@ function SpreadsheetView({
               })}
               className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted transition-colors text-zinc-600"
             >
-              Reset this supplier
+              {t("mismatches.reset_this_supplier")}
             </button>
           )}
           <button
@@ -881,7 +893,7 @@ function SpreadsheetView({
               <polyline points="7 10 12 15 17 10" />
               <line x1="12" y1="15" x2="12" y2="3" />
             </svg>
-            Export CSV
+            {t("mismatches.export_csv")}
           </button>
         </div>
       </div>
@@ -899,6 +911,7 @@ function SpreadsheetView({
 // ── Main page ──
 
 export default function MismatchesPage() {
+  const t = useT();
   const { orgs } = useOrgs();
   const [orgId, setOrgId] = useState("");
   const [period, setPeriod] = useState("2026-03");
@@ -943,14 +956,14 @@ export default function MismatchesPage() {
   return (
     <>
       <PageHeader
-        title="Mismatches"
-        description="Review discrepancies between ERP records and supplier statements"
+        title={t("mismatches.title")}
+        description={t("mismatches.description")}
       />
 
       {/* Controls */}
       <div className="flex gap-4 items-end mb-6">
         <div>
-          <label className="block text-xs font-medium mb-1">Organization</label>
+          <label className="block text-xs font-medium mb-1">{t("mismatches.organization")}</label>
           <select
             value={orgId}
             onChange={(e) => setOrgId(e.target.value)}
@@ -962,7 +975,7 @@ export default function MismatchesPage() {
           </select>
         </div>
         <div>
-          <label className="block text-xs font-medium mb-1">Period</label>
+          <label className="block text-xs font-medium mb-1">{t("common.period")}</label>
           <input
             type="text"
             value={period}
@@ -988,7 +1001,7 @@ export default function MismatchesPage() {
                 <rect x="3" y="14" width="7" height="7" />
                 <rect x="14" y="14" width="7" height="7" />
               </svg>
-              Review
+              {t("common.review")}
             </button>
             <button
               onClick={() => setViewMode("spreadsheet")}
@@ -1005,7 +1018,7 @@ export default function MismatchesPage() {
                 <line x1="9" y1="3" x2="9" y2="21" />
                 <line x1="15" y1="3" x2="15" y2="21" />
               </svg>
-              Spreadsheet
+              {t("mismatches.spreadsheet")}
             </button>
           </div>
         )}
@@ -1017,19 +1030,19 @@ export default function MismatchesPage() {
           <div className="flex gap-4 text-sm">
             <span>
               <span className="font-semibold">{suppliersWithIssues}</span>
-              <span className="text-zinc-500"> suppliers with mismatches</span>
+              <span className="text-zinc-500"> {t("mismatches.suppliers_with_mismatches")}</span>
             </span>
             <span className="text-zinc-300">|</span>
             <span>
               <span className="font-semibold text-red-500">{totalMismatches - totalResolved}</span>
-              <span className="text-zinc-500"> unresolved</span>
+              <span className="text-zinc-500"> {t("mismatches.unresolved")}</span>
             </span>
             {totalResolved > 0 && (
               <>
                 <span className="text-zinc-300">|</span>
                 <span>
                   <span className="font-semibold text-green-500">{totalResolved}</span>
-                  <span className="text-zinc-500"> resolved</span>
+                  <span className="text-zinc-500"> {t("mismatches.resolved")}</span>
                 </span>
               </>
             )}
@@ -1040,13 +1053,13 @@ export default function MismatchesPage() {
                 onClick={expandAll}
                 className="px-3 py-1 text-xs border border-border rounded-lg hover:bg-muted transition-colors"
               >
-                Expand All
+                {t("mismatches.expand_all")}
               </button>
               <button
                 onClick={collapseAll}
                 className="px-3 py-1 text-xs border border-border rounded-lg hover:bg-muted transition-colors"
               >
-                Collapse All
+                {t("mismatches.collapse_all")}
               </button>
             </div>
           )}
@@ -1055,12 +1068,12 @@ export default function MismatchesPage() {
 
       {/* Content */}
       {loading ? (
-        <div className="text-sm text-zinc-400 py-8 text-center">Loading mismatches...</div>
+        <div className="text-sm text-zinc-400 py-8 text-center">{t("mismatches.loading_mismatches")}</div>
       ) : error ? (
         <div className="text-sm text-red-600 bg-red-50 p-3 rounded-lg">{error}</div>
       ) : data.length === 0 ? (
         <div className="text-sm text-zinc-400 py-8 text-center border border-dashed border-border rounded-2xl">
-          No mismatches found. Run reconciliation first from the Reconciliation page.
+          {t("mismatches.no_mismatches_found")}
         </div>
       ) : viewMode === "spreadsheet" ? (
         <SpreadsheetView data={data} />

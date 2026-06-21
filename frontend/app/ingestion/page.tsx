@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react";
 import PageHeader from "../components/page-header";
 import { useOrgs } from "../lib/swr";
+import { CARD } from "@/app/lib/ui";
+import { FileDropzone } from "@/components/ui/file-dropzone";
+import { useT } from "@/app/lib/i18n";
 
 interface POOverlapInfo {
   file_po_count: number;
@@ -33,17 +36,18 @@ interface DuplicateInfo {
   row_count: number;
 }
 
-const FIELD_LABELS: Record<string, string> = {
-  po_number: "PO Number",
-  material_number: "Material #",
-  quantity: "Quantity",
-  unit_price: "Unit Price",
-  amount: "Amount",
-  delivery_date: "Delivery Date",
-  delivery_note_ref: "Delivery Note",
+const FIELD_LABEL_KEYS: Record<string, string> = {
+  po_number: "ingestion.field_po_number",
+  material_number: "ingestion.field_material_number",
+  quantity: "common.quantity",
+  unit_price: "common.unit_price",
+  amount: "common.amount",
+  delivery_date: "ingestion.field_delivery_date",
+  delivery_note_ref: "ingestion.field_delivery_note",
 };
 
 export default function IngestionPage() {
+  const t = useT();
   const { orgs } = useOrgs();
   const [orgId, setOrgId] = useState("");
 
@@ -104,15 +108,19 @@ export default function IngestionPage() {
             if (!trimmed.startsWith("data: ")) continue;
             const data = JSON.parse(trimmed.slice(6));
             if (data.type === "progress") {
-              setGrnStatus(data.message || "Processing...");
+              setGrnStatus(data.message || t("ingestion.processing"));
             } else if (data.type === "result") {
-              finalResult = `Ingested: ${data.rows_ingested} rows, Skipped: ${data.rows_skipped}, Suppliers created: ${data.suppliers_created}`;
+              finalResult = t("ingestion.grn_result", {
+                ingested: data.rows_ingested,
+                skipped: data.rows_skipped,
+                created: data.suppliers_created,
+              });
             }
           }
         }
       }
 
-      setGrnStatus(finalResult || "Upload complete");
+      setGrnStatus(finalResult || t("ingestion.upload_complete"));
     } catch (e) {
       setGrnStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -172,7 +180,11 @@ export default function IngestionPage() {
       const data = await res.json();
       if (res.ok) {
         setStmtResult(
-          `${replace ? "Replaced previous statement. " : ""}Ingested ${data.rows_ingested} rows, skipped ${data.rows_skipped}`
+          (replace ? t("ingestion.stmt_replaced_prefix") : "") +
+            t("ingestion.stmt_result", {
+              ingested: data.rows_ingested,
+              skipped: data.rows_skipped,
+            })
         );
         setStmtStep("done");
       } else if (res.status === 409) {
@@ -198,6 +210,15 @@ export default function IngestionPage() {
     setDuplicateInfo(null);
   }
 
+  // Shared dropzone strings (CSV/XLSX only — no docx/slides).
+  const dzLabels = {
+    click: t("ingestion.dropzone_click"),
+    hint: t("ingestion.dropzone_hint"),
+    formats: t("ingestion.dropzone_formats"),
+    replace: t("ingestion.dropzone_replace"),
+    remove: t("ingestion.dropzone_remove"),
+  };
+
   const reverseMapping: Record<string, string> = {};
   if (preview?.column_mapping) {
     for (const [field, header] of Object.entries(preview.column_mapping)) {
@@ -208,19 +229,19 @@ export default function IngestionPage() {
   return (
     <>
       <PageHeader
-        title="Data Ingestion"
-        description="Upload ERP goods receipt exports and supplier reconciliation statements"
+        title={t("ingestion.title")}
+        description={t("ingestion.description")}
       />
 
       {/* Org selector */}
       <div className="mb-6">
-        <label className="block text-sm font-medium mb-1">Organization</label>
+        <label className="block text-sm font-medium mb-1">{t("ingestion.organization")}</label>
         <select
           value={orgId}
           onChange={(e) => setOrgId(e.target.value)}
           className="border border-border rounded-lg px-3 py-2 text-sm w-full max-w-sm bg-card focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
         >
-          <option value="">Select...</option>
+          <option value="">{t("ingestion.select")}</option>
           {orgs.map((o) => (
             <option key={o.id} value={o.id}>
               {o.name}
@@ -231,20 +252,21 @@ export default function IngestionPage() {
 
       <div className="grid grid-cols-2 gap-6">
         {/* GRN Upload */}
-        <div className="bg-card rounded-2xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-          <h3 className="font-semibold text-sm mb-1">ERP / GRN Upload</h3>
+        <div className={`${CARD} p-5`}>
+          <h3 className="font-semibold text-sm mb-1">{t("ingestion.grn_card_title")}</h3>
           <p className="text-xs text-zinc-500 mb-4">
-            Upload your SGWERP goods receipt CSV/XLSX. This is your internal
-            record of what was received. Suppliers are auto-created from vendor
-            data in the file.
+            {t("ingestion.grn_card_help")}
           </p>
 
-          <label className="block text-xs font-medium mb-1">GRN File</label>
-          <input
-            type="file"
+          <label className="block text-xs font-medium mb-1">{t("ingestion.grn_file")}</label>
+          <FileDropzone
+            file={grnFile}
             accept=".csv,.xlsx,.xls"
-            onChange={(e) => setGrnFile(e.target.files?.[0] || null)}
-            className="block w-full text-sm mb-3"
+            onSelect={setGrnFile}
+            onRemove={() => setGrnFile(null)}
+            disabled={grnLoading}
+            labels={dzLabels}
+            className="mb-3"
           />
 
           <button
@@ -252,7 +274,7 @@ export default function IngestionPage() {
             disabled={!grnFile || !orgId || grnLoading}
             className="px-4 py-2 bg-accent hover:bg-accent-dark text-white rounded-lg text-sm disabled:opacity-40 transition-colors"
           >
-            {grnLoading ? "Uploading..." : "Upload GRN"}
+            {grnLoading ? t("ingestion.uploading") : t("ingestion.upload_grn")}
           </button>
 
           {grnStatus && (
@@ -269,25 +291,26 @@ export default function IngestionPage() {
         </div>
 
         {/* Statement Upload */}
-        <div className="bg-card rounded-2xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
-          <h3 className="font-semibold text-sm mb-1">Supplier Statement</h3>
+        <div className={`${CARD} p-5`}>
+          <h3 className="font-semibold text-sm mb-1">{t("ingestion.stmt_card_title")}</h3>
           <p className="text-xs text-zinc-500 mb-4">
-            Upload a reconciliation statement (对账单) received from a supplier.
-            The system will auto-detect the supplier, period, and column
-            structure.
+            {t("ingestion.stmt_card_help")}
           </p>
 
           {/* Step 1: File selection */}
           {stmtStep === "select" && (
             <>
               <label className="block text-xs font-medium mb-1">
-                Statement File
+                {t("ingestion.stmt_file")}
               </label>
-              <input
-                type="file"
+              <FileDropzone
+                file={stmtFile}
                 accept=".csv,.xlsx,.xls"
-                onChange={(e) => setStmtFile(e.target.files?.[0] || null)}
-                className="block w-full text-sm mb-3"
+                onSelect={setStmtFile}
+                onRemove={() => setStmtFile(null)}
+                disabled={stmtLoading}
+                labels={dzLabels}
+                className="mb-3"
               />
 
               <button
@@ -295,7 +318,7 @@ export default function IngestionPage() {
                 disabled={!stmtFile || !orgId || stmtLoading}
                 className="px-4 py-2 bg-accent hover:bg-accent-dark text-white rounded-lg text-sm disabled:opacity-40 transition-colors"
               >
-                {stmtLoading ? "Analyzing file..." : "Analyze File"}
+                {stmtLoading ? t("ingestion.analyzing") : t("ingestion.analyze_file")}
               </button>
             </>
           )}
@@ -305,52 +328,51 @@ export default function IngestionPage() {
             <div className="space-y-4">
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs space-y-2">
                 <p className="font-semibold text-blue-800">
-                  Auto-detected from file
+                  {t("ingestion.auto_detected")}
                 </p>
 
                 <div>
-                  <span className="text-blue-600">Supplier: </span>
+                  <span className="text-blue-600">{t("ingestion.supplier_label")} </span>
                   {preview.matched_supplier_name ? (
                     <span className="font-medium text-blue-900">
                       {preview.matched_supplier_name}
                     </span>
                   ) : preview.detected_supplier_name ? (
                     <span className="text-amber-700">
-                      &quot;{preview.detected_supplier_name}&quot; (not found in
-                      database)
+                      &quot;{preview.detected_supplier_name}&quot; {t("ingestion.not_found_in_db")}
                     </span>
                   ) : (
-                    <span className="text-zinc-400">Could not detect</span>
+                    <span className="text-zinc-400">{t("ingestion.could_not_detect")}</span>
                   )}
                 </div>
 
                 <div>
-                  <span className="text-blue-600">Period: </span>
+                  <span className="text-blue-600">{t("ingestion.period_label")} </span>
                   {preview.detected_period ? (
                     <span className="font-medium text-blue-900">
                       {preview.detected_period}
                     </span>
                   ) : (
-                    <span className="text-zinc-400">Could not detect</span>
+                    <span className="text-zinc-400">{t("ingestion.could_not_detect")}</span>
                   )}
                 </div>
 
                 <div>
-                  <span className="text-blue-600">Data rows: </span>
+                  <span className="text-blue-600">{t("ingestion.data_rows_label")} </span>
                   <span className="font-medium text-blue-900">
                     {preview.total_data_rows}
                   </span>
                 </div>
 
                 <div>
-                  <span className="text-blue-600">Column mapping: </span>
+                  <span className="text-blue-600">{t("ingestion.column_mapping_label")} </span>
                   {preview.column_mapping ? (
                     <span className="text-green-700 font-medium">
-                      {Object.keys(preview.column_mapping).length} fields mapped
+                      {t("ingestion.fields_mapped", { n: Object.keys(preview.column_mapping).length })}
                     </span>
                   ) : (
                     <span className="text-amber-700">
-                      Needs manual review
+                      {t("ingestion.needs_manual_review")}
                     </span>
                   )}
                 </div>
@@ -359,14 +381,14 @@ export default function IngestionPage() {
               {preview.po_overlap?.warning && (
                 <div className="border border-red-300 bg-red-50 rounded-lg p-3 text-xs">
                   <p className="font-semibold text-red-800 mb-1">
-                    PO Number Mismatch
+                    {t("ingestion.po_mismatch")}
                   </p>
                   <p className="text-red-700">
                     {preview.po_overlap.warning}
                   </p>
                   <p className="text-red-600 mt-1 font-mono">
-                    File POs: {preview.po_overlap.file_po_count} | Supplier ERP
-                    POs: {preview.po_overlap.erp_po_count} | In common:{" "}
+                    {t("ingestion.file_pos")} {preview.po_overlap.file_po_count} | {t("ingestion.supplier_erp_pos")}{" "}
+                    {preview.po_overlap.erp_po_count} | {t("ingestion.in_common")}{" "}
                     {preview.po_overlap.common_po_count} (
                     {preview.po_overlap.overlap_pct}%)
                   </p>
@@ -376,17 +398,16 @@ export default function IngestionPage() {
               {!preview.matched_supplier_id && (
                 <div className="text-xs p-3 border border-red-300 bg-red-50 rounded-lg">
                   <p className="font-semibold text-red-800">
-                    Could not match supplier to database
+                    {t("ingestion.could_not_match_supplier")}
                   </p>
                   <p className="text-red-700">
-                    Upload GRN data first so the supplier exists, or check that the
-                    statement has a company name (供货单位) in the header rows.
+                    {t("ingestion.could_not_match_supplier_help")}
                   </p>
                 </div>
               )}
               <div>
                 <label className="block text-xs font-medium mb-1">
-                  Period
+                  {t("common.period")}
                 </label>
                 <input
                   type="text"
@@ -400,10 +421,12 @@ export default function IngestionPage() {
               {preview.preview_rows.length > 0 && (
                 <div>
                   <p className="text-xs font-medium mb-2 text-zinc-600">
-                    Preview (first {preview.preview_rows.length} of{" "}
-                    {preview.total_data_rows} rows)
+                    {t("ingestion.preview_rows_count", {
+                      shown: preview.preview_rows.length,
+                      total: preview.total_data_rows,
+                    })}
                   </p>
-                  <div className="overflow-x-auto bg-card rounded-lg border border-border">
+                  <div className={`overflow-x-auto ${CARD}`}>
                     <table className="w-full text-xs">
                       <thead>
                         <tr className="bg-muted">
@@ -415,7 +438,9 @@ export default function IngestionPage() {
                               <div>{col}</div>
                               {reverseMapping[col] && (
                                 <div className="font-normal text-accent">
-                                  → {FIELD_LABELS[reverseMapping[col]] || reverseMapping[col]}
+                                  → {FIELD_LABEL_KEYS[reverseMapping[col]]
+                                    ? t(FIELD_LABEL_KEYS[reverseMapping[col]])
+                                    : reverseMapping[col]}
                                 </div>
                               )}
                             </th>
@@ -447,13 +472,13 @@ export default function IngestionPage() {
               {duplicateInfo && (
                 <div className="text-xs p-3 border border-amber-300 bg-amber-50 rounded-lg">
                   <p className="font-semibold text-amber-800 mb-1">
-                    Statement already exists
+                    {t("ingestion.stmt_already_exists")}
                   </p>
                   <p className="text-amber-700 mb-2">
-                    A statement for this supplier and period was uploaded on{" "}
-                    {new Date(duplicateInfo.upload_date).toLocaleDateString()}{" "}
-                    with {duplicateInfo.row_count} line items. Replacing will
-                    delete the previous data.
+                    {t("ingestion.stmt_already_exists_help", {
+                      date: new Date(duplicateInfo.upload_date).toLocaleDateString(),
+                      count: duplicateInfo.row_count,
+                    })}
                   </p>
                   <div className="flex gap-2">
                     <button
@@ -461,13 +486,13 @@ export default function IngestionPage() {
                       disabled={stmtLoading}
                       className="px-3 py-1.5 bg-amber-600 text-white rounded-lg text-xs font-medium disabled:opacity-40 transition-colors"
                     >
-                      {stmtLoading ? "Replacing..." : "Replace existing"}
+                      {stmtLoading ? t("ingestion.replacing") : t("ingestion.replace_existing")}
                     </button>
                     <button
                       onClick={() => setDuplicateInfo(null)}
                       className="px-3 py-1.5 border border-amber-300 text-amber-800 rounded-lg text-xs"
                     >
-                      Cancel
+                      {t("common.cancel")}
                     </button>
                   </div>
                 </div>
@@ -482,13 +507,13 @@ export default function IngestionPage() {
                     }
                     className="px-4 py-2 bg-accent hover:bg-accent-dark text-white rounded-lg text-sm disabled:opacity-40 transition-colors"
                   >
-                    {stmtLoading ? "Uploading..." : "Confirm & Upload"}
+                    {stmtLoading ? t("ingestion.uploading") : t("ingestion.confirm_upload")}
                   </button>
                   <button
                     onClick={resetStatement}
                     className="px-4 py-2 border border-border rounded-lg text-sm text-zinc-600 hover:bg-muted transition-colors"
                   >
-                    Start over
+                    {t("ingestion.start_over")}
                   </button>
                 </div>
               )}
@@ -505,7 +530,7 @@ export default function IngestionPage() {
                 onClick={resetStatement}
                 className="px-4 py-2 border border-border rounded-lg text-sm text-zinc-600 hover:bg-muted transition-colors"
               >
-                Upload another statement
+                {t("ingestion.upload_another")}
               </button>
             </div>
           )}

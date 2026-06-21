@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
+import { useT } from "@/app/lib/i18n";
 
 export interface GridColumn {
   key: string;
@@ -38,6 +39,7 @@ export default function SpreadsheetGrid({
   edits: Record<string, Record<string, unknown>>;
   onCellChange: (rowId: string, colKey: string, value: unknown) => void;
 }) {
+  const t = useT();
   const [active, setActive] = useState<CellRef | null>(null);
   const [editing, setEditing] = useState<CellRef | null>(null);
   const [editValue, setEditValue] = useState("");
@@ -303,7 +305,7 @@ export default function SpreadsheetGrid({
                 colSpan={columns.length + 1}
                 className="px-4 py-12 text-center text-zinc-400 text-sm"
               >
-                No data to display
+                {t("grid.no_data")}
               </td>
             </tr>
           )}

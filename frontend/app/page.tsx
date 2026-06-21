@@ -1,299 +1,468 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
+import { getLocalTimeZone } from "@internationalized/date";
 import PageHeader from "./components/page-header";
-import { useOrgs } from "./lib/swr";
+import { RoadmapCard, type RoadmapItem } from "@/components/ui/roadmap-card";
+import { CloseDatePicker } from "@/components/ui/close-date-picker";
+import { CARD } from "./lib/ui";
+import { useCloseDate } from "./lib/close-date";
+import { useT } from "./lib/i18n";
+import {
+  useSupplierOverview,
+  type DashboardSupplier,
+  type SupplierStatus,
+} from "./lib/swr";
 
-function ProgressRing({ percent, size = 80 }: { percent: number; size?: number }) {
-  const strokeWidth = 6;
-  const radius = (size - strokeWidth) / 2;
-  const circumference = 2 * Math.PI * radius;
-  const offset = circumference - (percent / 100) * circumference;
+const ACCENT = "#4169E1";
 
+// ── Helpers ──────────────────────────────────────────────────
+
+function formatCNY(n: number | null | undefined): string {
+  if (n === null || n === undefined) return "—";
+  return `¥${n.toLocaleString("en-US")}`;
+}
+
+/** Dictionary key for the queue description when the API gives no detail text. */
+function fallbackKey(status: SupplierStatus): string {
+  switch (status) {
+    case "pending":
+      return "dashboard.fallback.pending";
+    case "error":
+      return "dashboard.fallback.error";
+    case "in_review":
+      return "dashboard.fallback.in_review";
+    case "discrepancy":
+      return "dashboard.fallback.discrepancy";
+    default:
+      return "dashboard.fallback.matched";
+  }
+}
+
+/** Maps a status to the action-queue dot colour (red = urgent, amber = waiting, green = done). */
+function dotColor(status: SupplierStatus): string {
+  if (status === "discrepancy") return "bg-red-500";
+  if (status === "matched") return "bg-green-500";
+  return "bg-amber-400";
+}
+
+const STATUS_PILL: Record<SupplierStatus, string> = {
+  matched: "bg-green-50 text-green-700",
+  discrepancy: "bg-red-50 text-red-600",
+  in_review: "bg-amber-50 text-amber-700",
+  pending: "bg-gray-100 text-gray-500",
+  error: "bg-red-50 text-red-600",
+};
+
+// ── Primitive components ─────────────────────────────────────
+
+function Skeleton({ className = "" }: { className?: string }) {
+  return <div className={`animate-pulse rounded bg-gray-200 ${className}`} />;
+}
+
+const LABEL = "text-xs uppercase tracking-wide text-gray-400";
+
+function InlineError({ message, onRetry }: { message: string; onRetry: () => void }) {
+  const t = useT();
   return (
-    <svg width={size} height={size} className="transform -rotate-90">
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        fill="none"
-        strokeWidth={strokeWidth}
-        className="stroke-white/15"
-      />
-      <circle
-        cx={size / 2}
-        cy={size / 2}
-        r={radius}
-        fill="none"
-        strokeWidth={strokeWidth}
-        strokeLinecap="round"
-        strokeDasharray={circumference}
-        strokeDashoffset={offset}
-        className="stroke-white transition-all duration-600"
-      />
-    </svg>
+    <div className="text-sm text-red-600">
+      {message}{" "}
+      <button
+        onClick={onRetry}
+        className="font-medium underline underline-offset-2 hover:text-red-700"
+      >
+        {t("common.retry")}
+      </button>
+    </div>
   );
 }
 
-export default function DashboardPage() {
-  const { orgs, orgsLoading } = useOrgs();
-  const apiOk = orgsLoading ? null : orgs.length >= 0 ? true : false;
+function StatusPill({ status }: { status: SupplierStatus }) {
+  const t = useT();
+  return (
+    <span
+      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${STATUS_PILL[status]}`}
+    >
+      {t(`common.status.${status}`)}
+    </span>
+  );
+}
 
-  const enginePhase = 7;
-  const totalPhases = 10;
-  const progressPercent = Math.round((enginePhase / totalPhases) * 100);
+/** Action control shared by the queue and table. */
+function ActionControl({
+  action,
+  size = "sm",
+}: {
+  action: DashboardSupplier["action_required"];
+  size?: "sm" | "xs";
+}) {
+  const t = useT();
+  if (action === "none") {
+    return (
+      <span className="inline-flex items-center justify-center text-gray-300" aria-label="Done">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      </span>
+    );
+  }
+  const isUpload = action === "upload";
+  const label = isUpload ? t("common.upload") : t("common.review");
+  const href = isUpload ? "/ingestion" : "/mismatches";
+  const pad = size === "xs" ? "px-2.5 py-1 text-xs" : "px-3 py-1.5 text-xs";
+  return (
+    <Link
+      href={href}
+      className={`inline-flex items-center rounded-md font-medium text-white no-underline transition-opacity hover:opacity-90 ${pad}`}
+      style={{ backgroundColor: ACCENT }}
+    >
+      {label}
+    </Link>
+  );
+}
+
+// ── Section 1: Stat cards ────────────────────────────────────
+
+function StatCard({
+  label,
+  children,
+  subtext,
+  action,
+}: {
+  label: string;
+  children: React.ReactNode;
+  subtext: React.ReactNode;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className={`${CARD} relative p-4`}>
+      {action && <div className="absolute right-2.5 top-2.5">{action}</div>}
+      <div className={LABEL}>{label}</div>
+      <div className="mt-2">{children}</div>
+      <div className="mt-1.5 text-xs text-gray-400">{subtext}</div>
+    </div>
+  );
+}
+
+// ── Page ─────────────────────────────────────────────────────
+
+export default function DashboardPage() {
+  const t = useT();
+  const { suppliers, suppliersLoading, suppliersError, refreshSuppliers } =
+    useSupplierOverview();
+
+  // Month-end close date (user-configurable, persisted) + countdown.
+  // Client-only to avoid hydration drift.
+  const { closeDate, daysLeft, setCloseDate } = useCloseDate();
+  const closeLabel = closeDate
+    ? closeDate
+        .toDate(getLocalTimeZone())
+        .toLocaleDateString(undefined, { month: "short", day: "numeric" })
+    : null;
+
+  // Derived metrics from the supplier array.
+  const total = suppliers.length;
+  const matched = suppliers.filter((s) => s.status === "matched").length;
+  const pendingReview = total - matched;
+  const discrepancySuppliers = suppliers.filter((s) => s.status === "discrepancy");
+  const discrepancyValue = discrepancySuppliers.reduce(
+    (sum, s) => sum + (s.discrepancy_value ?? 0),
+    0
+  );
+  const matchedPct = total > 0 ? (matched / total) * 100 : 0;
+
+  const queue = suppliers.filter((s) => s.status !== "matched");
+
+  // Month-end close pipeline. Supplier Reconciliation is the live stage (shows
+  // matched/total); the rest unlock sequentially and stay "Not Started" for now.
+  const closeLoading = suppliersLoading && total === 0;
+  const closeStages: RoadmapItem[] = [
+    {
+      quarter: t("dashboard.step", { n: 1 }),
+      title: t("dashboard.stage.supplier_recon"),
+      description: closeLoading
+        ? t("common.loading")
+        : t("dashboard.stage_complete", { n: matched, total }),
+      status: "in-progress",
+    },
+    {
+      quarter: t("dashboard.step", { n: 2 }),
+      title: t("dashboard.stage.invoice_matching"),
+      description: t("dashboard.not_started"),
+      status: "upcoming",
+    },
+    {
+      quarter: t("dashboard.step", { n: 3 }),
+      title: t("dashboard.stage.discrepancy_resolution"),
+      description: t("dashboard.not_started"),
+      status: "upcoming",
+    },
+    {
+      quarter: t("dashboard.step", { n: 4 }),
+      title: t("dashboard.stage.cfo_signoff"),
+      description: t("dashboard.not_started"),
+      status: "upcoming",
+    },
+  ];
+
+  const daysColor =
+    daysLeft === null
+      ? "text-gray-800"
+      : daysLeft <= 5
+        ? "text-red-600"
+        : daysLeft <= 10
+          ? "text-amber-500"
+          : "text-gray-800";
 
   return (
-    <>
+    <div className="animate-fade-in-up">
       <PageHeader
-        title="Dashboard"
-        description="Overview of your accounting co-pilot"
+        title={t("dashboard.title")}
+        description={t("dashboard.subtitle")}
       />
 
-      {/* Bento Grid */}
-      <div className="grid grid-cols-3 grid-rows-[auto_auto] gap-4">
-
-        {/* Hero Card — Engine Status */}
-        <div className="row-span-2 rounded-2xl p-6 text-white bg-gradient-to-br from-[#7c4dff] via-accent to-accent-dark shadow-[0_4px_20px_rgba(108,60,224,0.3)] flex flex-col justify-between min-h-[280px]">
-          <div>
-            <div className="flex items-center gap-2 mb-5">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="opacity-80">
-                <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
-                <polyline points="22 4 12 14.01 9 11.01" />
-              </svg>
-              <span className="text-sm font-semibold tracking-wide">Engine Active</span>
-            </div>
-
-            <div className="flex items-center gap-5 mb-6">
-              <div className="relative">
-                <ProgressRing percent={progressPercent} />
-                <div className="absolute inset-0 flex items-center justify-center text-lg font-bold">
-                  {progressPercent}%
-                </div>
+      {/* ── Section 1: Stat cards ── */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {/* Card 1 — Suppliers Reconciled */}
+        <StatCard
+          label={t("dashboard.card.suppliers_reconciled")}
+          subtext={
+            suppliersError ? (
+              <span className="text-red-600">{t("dashboard.could_not_load")}</span>
+            ) : suppliersLoading ? (
+              <Skeleton className="h-3 w-24" />
+            ) : (
+              t("dashboard.pending_review", { n: pendingReview })
+            )
+          }
+        >
+          {suppliersError ? (
+            <InlineError message={t("dashboard.err_supplier_data")} onRetry={refreshSuppliers} />
+          ) : suppliersLoading ? (
+            <Skeleton className="h-9 w-28" />
+          ) : (
+            <>
+              <div className="text-3xl font-bold text-gray-800">
+                {matched} / {total}{" "}
+                <span className="text-sm font-medium text-gray-400">{t("dashboard.this_month")}</span>
               </div>
-              <div className="space-y-2">
-                <div>
-                  <div className="text-[10px] uppercase tracking-widest opacity-60">Phase</div>
-                  <div className="text-sm font-semibold">{enginePhase} / {totalPhases}</div>
-                </div>
-                <div>
-                  <div className="text-[10px] uppercase tracking-widest opacity-60">Status</div>
-                  <div className="text-sm font-semibold">Invoice Processing</div>
-                </div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <div className="text-[10px] uppercase tracking-widest opacity-60">Layers</div>
-                <div className="text-xl font-bold">4</div>
-              </div>
-              <div>
-                <div className="text-[10px] uppercase tracking-widest opacity-60">AI Model</div>
-                <div className="text-sm font-semibold mt-0.5">Claude Haiku</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/15">
-            <span className="text-xs opacity-70">Reconciliation Engine</span>
-            <div className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-              <span className="text-xs font-medium">Live</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Organizations Card */}
-        <div className="bg-card rounded-2xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-shadow">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold text-zinc-800">Organizations</h3>
-            <div className="flex -space-x-2">
-              {orgs.slice(0, 3).map((org, i) => (
+              <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
                 <div
-                  key={org.id}
-                  className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white ring-2 ring-white"
-                  style={{
-                    background: ["#6c3ce0", "#3d8bfd", "#0d9488"][i % 3],
-                  }}
-                >
-                  {org.name.charAt(0)}
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="text-3xl font-bold text-zinc-800">
-            {orgs.length.toString().padStart(2, "0")}
-          </div>
-          <p className="text-xs text-zinc-400 mt-1">
-            {orgs.length === 1 ? "Entity" : "Entities"} Connected
-          </p>
-        </div>
+                  className="h-full rounded-full transition-all"
+                  style={{ width: `${matchedPct}%`, backgroundColor: ACCENT }}
+                />
+              </div>
+            </>
+          )}
+        </StatCard>
 
-        {/* Match Accuracy Card */}
-        <div className="bg-card rounded-2xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-shadow">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-semibold text-zinc-800">Accuracy</h3>
-            <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-accent-light text-accent">
-              High Precision
+        {/* Card 2 — Unresolved Discrepancy Value */}
+        <StatCard
+          label={t("dashboard.card.discrepancy_value")}
+          subtext={
+            suppliersLoading || suppliersError ? (
+              suppliersLoading ? <Skeleton className="h-3 w-24" /> : <span className="text-red-600">{t("dashboard.could_not_load")}</span>
+            ) : (
+              t("dashboard.across_suppliers", { n: discrepancySuppliers.length })
+            )
+          }
+        >
+          {suppliersError ? (
+            <InlineError message={t("dashboard.err_discrepancies")} onRetry={refreshSuppliers} />
+          ) : suppliersLoading ? (
+            <Skeleton className="h-9 w-28" />
+          ) : (
+            <div
+              className={`text-3xl font-bold ${discrepancyValue > 0 ? "text-red-600" : "text-green-600"}`}
+            >
+              {formatCNY(discrepancyValue)}
+            </div>
+          )}
+        </StatCard>
+
+        {/* Card 3 — Invoice Processing (static placeholder, Phase 2) */}
+        <StatCard
+          label={t("dashboard.card.invoices")}
+          subtext={t("dashboard.invoices_phase2_sub")}
+        >
+          <div className="flex items-center gap-2">
+            <span className="text-2xl font-bold text-gray-300">—</span>
+            <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-500">
+              {t("dashboard.invoices_phase2")}
             </span>
           </div>
-          <div className="text-[11px] text-zinc-400 uppercase tracking-wider mb-1">
-            4-Layer Match Rate
-          </div>
-          <div className="text-5xl font-bold text-zinc-800 tracking-tight">
-            99.9<span className="text-2xl">%</span>
-          </div>
-          <div className="flex items-center gap-3 mt-3">
-            <div className="h-1.5 flex-1 bg-zinc-100 rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full bg-gradient-to-r from-[#7c4dff] via-accent to-accent-dark"
-                style={{ width: "99.9%" }}
-              />
+        </StatCard>
+
+        {/* Card 4 — Days to Month-End Close */}
+        <StatCard
+          label={t("dashboard.card.days_to_close")}
+          subtext={
+            closeLabel ? (
+              t("dashboard.closes_on", { date: closeLabel })
+            ) : (
+              <Skeleton className="h-3 w-24" />
+            )
+          }
+          action={
+            <CloseDatePicker
+              value={closeDate}
+              onChange={setCloseDate}
+              label={t("dashboard.set_close_date")}
+            />
+          }
+        >
+          {daysLeft === null ? (
+            <Skeleton className="h-9 w-28" />
+          ) : (
+            <div className={`text-3xl font-bold ${daysColor}`}>
+              {daysLeft}{" "}
+              <span className="text-sm font-medium text-gray-400">
+                {t("dashboard.days")}
+              </span>
             </div>
-            <span className="text-[10px] text-zinc-400">Target Reliability</span>
-          </div>
+          )}
+        </StatCard>
+      </div>
+
+      {/* ── Section 2: Action queue ── */}
+      <div className={`${CARD} mt-6`}>
+        <div className="border-b border-gray-100 px-5 py-4">
+          <h3 className="text-base font-semibold text-gray-800">{t("dashboard.needs_attention")}</h3>
         </div>
 
-        {/* System Status Card */}
-        <div className="bg-card rounded-2xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-shadow">
-          <h3 className="text-sm font-semibold text-zinc-800 mb-3">System Status</h3>
-          <div className="space-y-2.5">
-            {[
-              { label: "API", status: apiOk === null ? "Checking" : apiOk ? "Connected" : "Offline", ok: apiOk },
-              { label: "Database", status: apiOk ? "Connected" : "Unknown", ok: apiOk ?? undefined },
-              { label: "AI Engine", status: apiOk ? "Ready" : "Unknown", ok: apiOk ?? undefined },
-            ].map((item) => (
-              <div key={item.label} className="flex items-center justify-between">
-                <span className="text-xs text-zinc-500">{item.label}</span>
-                <div className="flex items-center gap-1.5">
-                  <span
-                    className={`w-2 h-2 rounded-full ${
-                      item.ok === null || item.ok === undefined
-                        ? "bg-amber-400 animate-pulse"
-                        : item.ok
-                          ? "bg-green-400"
-                          : "bg-red-400"
-                    }`}
-                  />
-                  <span className="text-xs font-medium text-zinc-600">{item.status}</span>
+        {suppliersError ? (
+          <div className="px-5 py-6">
+            <InlineError message={t("dashboard.err_supplier_data")} onRetry={refreshSuppliers} />
+          </div>
+        ) : suppliersLoading ? (
+          <div>
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center gap-3 border-b border-gray-100 px-5 py-4 last:border-b-0">
+                <Skeleton className="h-2.5 w-2.5 rounded-full" />
+                <div className="flex-1 space-y-2">
+                  <Skeleton className="h-3.5 w-40" />
+                  <Skeleton className="h-3 w-3/4" />
+                </div>
+                <Skeleton className="h-7 w-16" />
+              </div>
+            ))}
+          </div>
+        ) : queue.length === 0 ? (
+          <div className="px-5 py-8 text-center text-sm text-gray-400">
+            {t("dashboard.all_reconciled")}
+          </div>
+        ) : (
+          <div>
+            {queue.map((s) => (
+              <div
+                key={s.vendor_code}
+                className="flex items-center gap-3 border-b border-gray-100 px-5 py-4 transition-colors last:border-b-0 hover:bg-gray-50"
+              >
+                <span className={`mt-1 h-2.5 w-2.5 shrink-0 self-start rounded-full ${dotColor(s.status)}`} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium text-gray-800">
+                    {s.display_name}{" "}
+                    <span className="font-normal text-gray-400">[{s.pinyin}]</span>
+                  </div>
+                  <div className="mt-0.5 text-sm text-gray-600">
+                    {s.discrepancy_details ?? t(fallbackKey(s.status))}
+                  </div>
+                </div>
+                <div className="shrink-0">
+                  <ActionControl action={s.action_required} />
                 </div>
               </div>
             ))}
           </div>
+        )}
+      </div>
+
+      {/* ── Section 3: Month-end close progress ── */}
+      <RoadmapCard
+        className="mt-6"
+        title={t("dashboard.close_progress_title")}
+        description={
+          closeLoading
+            ? t("common.loading")
+            : t("dashboard.close_progress_note", { matched, total })
+        }
+        items={closeStages}
+      />
+
+      {/* ── Section 4: Supplier overview table ── */}
+      <div className={`${CARD} mt-6`}>
+        <div className="border-b border-gray-100 px-5 py-4">
+          <h3 className="text-base font-semibold text-gray-800">{t("dashboard.supplier_overview")}</h3>
         </div>
 
-        {/* Processing Speed Card */}
-        <div className="bg-card rounded-2xl p-6 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-shadow">
-          <h3 className="text-sm font-semibold text-zinc-800 mb-1">Processing Speed</h3>
-          <div className="text-5xl font-bold text-zinc-800 tracking-tight mt-2">
-            7<span className="text-2xl">x</span>
+        {suppliersError ? (
+          <div className="px-5 py-6">
+            <InlineError message={t("dashboard.err_supplier_data")} onRetry={refreshSuppliers} />
           </div>
-          <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
-            Reduce supplier reconciliation from 7 days to 1 day with AI-powered matching.
-          </p>
-        </div>
-      </div>
-
-      {/* Quick Actions */}
-      <h3 className="text-sm font-semibold text-zinc-800 mt-8 mb-3">Quick Actions</h3>
-      <div className="grid grid-cols-4 gap-3">
-        {[
-          {
-            href: "/ingestion",
-            title: "Upload Data",
-            desc: "Import GRN exports and supplier statements",
-            icon: (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
-                <polyline points="17 8 12 3 7 8" />
-                <line x1="12" y1="3" x2="12" y2="15" />
-              </svg>
-            ),
-          },
-          {
-            href: "/reconciliation",
-            title: "Reconcile",
-            desc: "Run the 4-layer matching engine",
-            icon: (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M22 11.08V12a10 10 0 11-5.93-9.14" />
-                <polyline points="22 4 12 14.01 9 11.01" />
-              </svg>
-            ),
-          },
-          {
-            href: "/invoices",
-            title: "Invoices",
-            desc: "Upload fapiao for OCR extraction",
-            icon: (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-                <line x1="16" y1="13" x2="8" y2="13" />
-                <line x1="16" y1="17" x2="8" y2="17" />
-              </svg>
-            ),
-          },
-          {
-            href: "/settings",
-            title: "Settings",
-            desc: "Organization and engine config",
-            icon: (
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="3" />
-                <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z" />
-              </svg>
-            ),
-          },
-        ].map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className="bg-card rounded-2xl p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_12px_rgba(0,0,0,0.06)] transition-shadow group flex flex-col gap-3 no-underline"
-          >
-            <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-accent-light text-accent">
-              {item.icon}
-            </div>
-            <div>
-              <div className="text-sm font-semibold text-zinc-800 group-hover:text-accent transition-colors">
-                {item.title}
-              </div>
-              <div className="text-xs text-zinc-400 mt-0.5">{item.desc}</div>
-            </div>
-          </Link>
-        ))}
-      </div>
-
-      {/* Organizations table */}
-      {orgs.length > 0 && (
-        <div className="mt-8">
-          <h3 className="text-sm font-semibold text-zinc-800 mb-3">Entities</h3>
-          <div className="bg-card rounded-2xl shadow-[0_1px_3px_rgba(0,0,0,0.04)] overflow-hidden">
+        ) : (
+          <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b border-border text-xs text-zinc-400 uppercase tracking-wider">
-                  <th className="text-left px-5 py-3 font-medium">Name</th>
-                  <th className="text-left px-5 py-3 font-medium">Currency</th>
-                  <th className="text-left px-5 py-3 font-medium">ID</th>
+                <tr className="text-xs uppercase tracking-wide text-gray-400">
+                  <th className="px-5 py-3 text-left font-medium">{t("dashboard.col.supplier")}</th>
+                  <th className="px-5 py-3 text-left font-medium">{t("dashboard.col.status")}</th>
+                  <th className="px-5 py-3 text-right font-medium">{t("dashboard.col.erp_total")}</th>
+                  <th className="px-5 py-3 text-right font-medium">{t("dashboard.col.statement_total")}</th>
+                  <th className="px-5 py-3 text-right font-medium">{t("dashboard.col.discrepancy")}</th>
+                  <th className="px-5 py-3 text-right font-medium">{t("dashboard.col.action")}</th>
                 </tr>
               </thead>
               <tbody>
-                {orgs.map((org) => (
-                  <tr key={org.id} className="border-t border-border hover:bg-muted transition-colors">
-                    <td className="px-5 py-3 font-medium text-zinc-800">{org.name}</td>
-                    <td className="px-5 py-3 text-zinc-600">{org.reporting_currency}</td>
-                    <td className="px-5 py-3 font-mono text-xs text-zinc-400">
-                      {org.id.slice(0, 8)}...
-                    </td>
-                  </tr>
-                ))}
+                {suppliersLoading ? (
+                  [0, 1, 2, 3, 4].map((i) => (
+                    <tr key={i} className="border-t border-gray-100">
+                      <td className="px-5 py-3"><Skeleton className="h-4 w-32" /></td>
+                      <td className="px-5 py-3"><Skeleton className="h-5 w-20 rounded-full" /></td>
+                      <td className="px-5 py-3"><Skeleton className="ml-auto h-4 w-20" /></td>
+                      <td className="px-5 py-3"><Skeleton className="ml-auto h-4 w-20" /></td>
+                      <td className="px-5 py-3"><Skeleton className="ml-auto h-4 w-16" /></td>
+                      <td className="px-5 py-3"><Skeleton className="ml-auto h-7 w-16" /></td>
+                    </tr>
+                  ))
+                ) : (
+                  suppliers.map((s) => {
+                    const hasDiscrepancy = (s.discrepancy_value ?? 0) > 0;
+                    return (
+                      <tr
+                        key={s.vendor_code}
+                        className="border-t border-gray-100 transition-colors hover:bg-gray-50"
+                      >
+                        <td className="px-5 py-3 font-medium text-gray-800">
+                          {s.display_name}{" "}
+                          <span className="font-normal text-gray-400">[{s.pinyin}]</span>
+                        </td>
+                        <td className="px-5 py-3">
+                          <StatusPill status={s.status} />
+                        </td>
+                        <td className="px-5 py-3 text-right font-mono text-gray-700">
+                          {formatCNY(s.erp_total)}
+                        </td>
+                        <td className="px-5 py-3 text-right font-mono text-gray-700">
+                          {formatCNY(s.statement_total)}
+                        </td>
+                        <td
+                          className={`px-5 py-3 text-right font-mono ${hasDiscrepancy ? "text-red-600" : "text-gray-400"}`}
+                        >
+                          {hasDiscrepancy ? formatCNY(s.discrepancy_value) : "—"}
+                        </td>
+                        <td className="px-5 py-3 text-right">
+                          <ActionControl action={s.action_required} size="xs" />
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
-        </div>
-      )}
-    </>
+        )}
+      </div>
+    </div>
   );
 }
+

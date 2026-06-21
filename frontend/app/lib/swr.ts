@@ -46,40 +46,15 @@ export function useOrgs() {
   };
 }
 
-interface InvoiceListItem {
-  id: string;
-  invoice_number: string | null;
-  invoice_date: string | null;
-  total_amount: number | null;
-  currency: string;
-  status: string;
-  supplier_name_extracted: string | null;
-  needs_review: boolean;
-  extraction_confidence: number | null;
-  created_at: string;
-}
+// ── Invoice Processing — disabled until Phase 2 ──────────────
+// The invoice endpoints are not ready, so the hook below is intentionally
+// removed to avoid broken API calls / error states on the dashboard. The
+// Invoice Processing page is a static "Coming in Phase 2" placeholder.
+//
+// interface InvoiceListItem { ... }
+// export function useInvoices(orgId, statusFilter, reviewFilter) { ... }
 
-export function useInvoices(orgId: string, statusFilter: string, reviewFilter: string) {
-  let key: string | null = null;
-  if (orgId) {
-    key = `/invoices/?org_id=${orgId}&limit=100`;
-    if (statusFilter) key += `&status=${statusFilter}`;
-    if (reviewFilter) key += `&needs_review=${reviewFilter}`;
-  }
-  const { data, error, isLoading, mutate } = useSWR<InvoiceListItem[]>(
-    key,
-    fetcher,
-    swrDefaults
-  );
-  return {
-    invoices: data ?? [],
-    invoicesLoading: isLoading,
-    invoicesError: error,
-    refreshInvoices: () => mutate(),
-  };
-}
-
-interface SupplierReady {
+export interface SupplierReady {
   id: string;
   name: string;
   vendor_code: string;
@@ -90,6 +65,14 @@ interface SupplierReady {
   ready: boolean;
   last_match_rate: number | null;
   last_run_status: string | null;
+  // Review-queue breakdown for the latest run (0 if no run yet).
+  total_lines: number;
+  pending_review: number;
+  confirmed: number;
+  rejected: number;
+  unmatched: number;
+  near_exact_count: number;
+  has_near_exact: boolean;
 }
 
 export function useSuppliers(orgId: string, period: string) {
@@ -108,6 +91,74 @@ export function useSuppliers(orgId: string, period: string) {
     refreshSuppliers: () => mutate(),
   };
 }
+
+// ── Review queue ─────────────────────────────────────────────
+
+export interface ReviewItem {
+  id: string;
+  match_type: string;
+  status: string;
+  discrepancy_type: string | null;
+  quantity_delta: number | null;
+  price_delta: number | null;
+  amount_delta: number | null;
+  confidence: number | null;
+  confidence_score: number;
+  confidence_label: string | null;
+  sort_priority: number;
+  discrepancy_note: string | null;
+  amount: number | null;
+  reviewer_id: string | null;
+  match_details: Record<string, unknown> | null;
+}
+
+// The review queue is fetched directly in the reconciliation page (local state)
+// so it can be refreshed precisely after a run and after each approve/reject.
+// Endpoint: GET /api/v1/reconciliation/{supplierId}/{period}
+
+// ── Dashboard ────────────────────────────────────────────────
+
+export type SupplierStatus =
+  | "matched"
+  | "discrepancy"
+  | "in_review"
+  | "pending"
+  | "error";
+
+export interface DashboardSupplier {
+  vendor_code: string;
+  name: string;
+  display_name: string;
+  pinyin: string;
+  status: SupplierStatus;
+  erp_total: number | null;
+  statement_total: number | null;
+  discrepancy_value: number | null;
+  discrepancy_details: string | null;
+  action_required: "review" | "upload" | "none";
+}
+
+/** GET /api/suppliers — full supplier overview for the dashboard. */
+export function useSupplierOverview() {
+  const { data, error, isLoading, mutate } = useSWR<DashboardSupplier[]>(
+    "/api/suppliers",
+    fetcher,
+    swrDefaults
+  );
+  return {
+    suppliers: data ?? [],
+    suppliersLoading: isLoading,
+    suppliersError: error as Error | undefined,
+    refreshSuppliers: () => mutate(),
+  };
+}
+
+// GET /api/invoices/missing-count — removed for Phase 2.
+// This endpoint does not exist yet; calling it produced the broken
+// "Invoices Missing — Could not load invoice count." dashboard error state.
+// The dashboard now shows a static "Coming in Phase 2" placeholder instead.
+//
+// export function useMissingInvoiceCount() { ... }
 
 interface SideRecord {
   po_number: string | null;

@@ -167,12 +167,15 @@ def _load_db_context(org_id: str | None) -> str:
                 )
 
             # ── Top mismatches (discrepancies from latest runs) ──
+            # Nothing auto-matches now; a "discrepancy" is any result carrying a
+            # discrepancy_type (near_exact deltas, unmatched, or layer deltas),
+            # regardless of its pending/confirmed/rejected review status.
             run_ids = [r.id for r in unique_runs]
             mismatches = (
                 db.query(ReconciliationResult)
                 .filter(
                     ReconciliationResult.run_id.in_(run_ids),
-                    ReconciliationResult.status.in_(["discrepancy"]),
+                    ReconciliationResult.discrepancy_type.isnot(None),
                 )
                 .limit(60)
                 .all()

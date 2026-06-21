@@ -257,7 +257,7 @@ class ReconciliationResult(Base):
         nullable=True,
     )
 
-    # match_type: exact | fuzzy | multi_po_dn | ai | unmatched
+    # match_type: exact | near_exact | fuzzy | aggregate | multi_po_dn | ai | unmatched
     match_type: Mapped[str] = mapped_column(String, nullable=False)
     quantity_delta: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
     price_delta: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
@@ -266,8 +266,25 @@ class ReconciliationResult(Base):
     #                   missing_from_erp | missing_from_statement
     discrepancy_type: Mapped[str | None] = mapped_column(String, nullable=True)
     confidence: Mapped[Decimal | None] = mapped_column(Numeric(3, 2), nullable=True)
-    # status: matched | discrepancy | resolved
+    # status: pending_review | confirmed | rejected | unmatched
+    # (nothing auto-matches anymore — every matched pair is queued for human review)
     status: Mapped[str] = mapped_column(String, nullable=False)
+
+    # --- Human review queue (added 0005) ---
+    # Integer 0-100 confidence used for ranking the review queue.
+    confidence_score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Human-readable bucket label, e.g. "Exact Match", "Probable Match".
+    confidence_label: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    # Lower number = higher confidence = shown first (1=exact ... 6=no match).
+    sort_priority: Mapped[int] = mapped_column(Integer, nullable=False, default=99)
+    # Inline explanation of a small discrepancy (populated for near_exact).
+    discrepancy_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Reviewer identity + timestamp once confirmed/rejected.
+    reviewer_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     resolved_by: Mapped[str | None] = mapped_column(String, nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(

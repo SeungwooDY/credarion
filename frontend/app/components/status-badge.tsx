@@ -1,3 +1,19 @@
+import { useT } from "@/app/lib/i18n";
+
+const LABEL_KEYS: Record<string, string> = {
+  received: "statusBadge.received",
+  extracted: "statusBadge.extracted",
+  matched: "common.status.matched",
+  approved: "statusBadge.approved",
+  paid: "statusBadge.paid",
+  running: "statusBadge.running",
+  completed: "statusBadge.completed",
+  failed: "statusBadge.failed",
+  discrepancy: "common.status.discrepancy",
+  success: "statusBadge.success",
+  error: "common.status.error",
+};
+
 const COLORS: Record<string, string> = {
   received: "bg-zinc-100 text-zinc-600",
   extracted: "bg-[var(--accent-light)] text-[var(--accent)]",
@@ -13,12 +29,15 @@ const COLORS: Record<string, string> = {
 };
 
 export default function StatusBadge({ status }: { status: string }) {
+  const t = useT();
   const color = COLORS[status] ?? "bg-zinc-100 text-zinc-600";
+  const labelKey = LABEL_KEYS[status];
+  const label = labelKey ? t(labelKey) : status;
   return (
     <span
       className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium ${color}`}
     >
-      {status}
+      {label}
     </span>
   );
 }

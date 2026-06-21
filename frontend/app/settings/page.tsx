@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import PageHeader from "../components/page-header";
 import { useOrgs, useReconConfig } from "../lib/swr";
+import { CARD } from "@/app/lib/ui";
+import { useT } from "@/app/lib/i18n";
 
 interface ReconConfigForm {
   qty_tolerance_pct: number;
@@ -13,6 +15,7 @@ interface ReconConfigForm {
 }
 
 export default function SettingsPage() {
+  const t = useT();
   const { orgs, refreshOrgs } = useOrgs();
   const [orgId, setOrgId] = useState("");
   const [newOrgName, setNewOrgName] = useState("");
@@ -50,15 +53,23 @@ export default function SettingsPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        setOrgMsg(`Created: ${data.name}`);
+        setOrgMsg(t("settings.created_msg", { name: data.name }));
         setNewOrgName("");
         await refreshOrgs();
         setOrgId(data.id);
       } else {
-        setOrgMsg(`Error: ${data.detail || JSON.stringify(data)}`);
+        setOrgMsg(
+          t("settings.error_msg", {
+            detail: data.detail || JSON.stringify(data),
+          })
+        );
       }
     } catch (e) {
-      setOrgMsg(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      setOrgMsg(
+        t("settings.error_msg", {
+          detail: e instanceof Error ? e.message : String(e),
+        })
+      );
     }
   }
 
@@ -71,29 +82,29 @@ export default function SettingsPage() {
         body: JSON.stringify(formConfig),
       });
       if (res.ok) {
-        setConfigMsg("Saved");
+        setConfigMsg(t("settings.saved"));
         refreshConfig();
         setTimeout(() => setConfigMsg(""), 2000);
       } else {
         const err = await res.json();
-        setConfigMsg(`Error: ${err.detail}`);
+        setConfigMsg(t("settings.error_msg", { detail: err.detail }));
       }
     } catch {
-      setConfigMsg("Save failed");
+      setConfigMsg(t("settings.save_failed"));
     }
   }
 
   return (
     <>
       <PageHeader
-        title="Settings"
-        description="Manage organizations and reconciliation configuration"
+        title={t("settings.title")}
+        description={t("settings.description")}
       />
 
       <div className="grid grid-cols-2 gap-6">
         {/* Organization Management */}
-        <div className="border border-border rounded-lg p-5">
-          <h3 className="font-semibold text-sm mb-4">Organizations</h3>
+        <div className={`${CARD} p-5`}>
+          <h3 className="font-semibold text-sm mb-4">{t("settings.organizations")}</h3>
 
           <div className="space-y-2 mb-4">
             {orgs.map((o) => (
@@ -119,14 +130,14 @@ export default function SettingsPage() {
           <hr className="border-border mb-4" />
 
           <label className="block text-xs font-medium mb-1">
-            Create New Organization
+            {t("settings.create_new_org")}
           </label>
           <div className="flex gap-2">
             <input
               type="text"
               value={newOrgName}
               onChange={(e) => setNewOrgName(e.target.value)}
-              placeholder="e.g. 梅州国威电子有限公司"
+              placeholder={t("settings.org_name_placeholder")}
               className="flex-1 border border-border rounded px-3 py-2 text-sm bg-white"
             />
             <button
@@ -134,7 +145,7 @@ export default function SettingsPage() {
               disabled={!newOrgName.trim()}
               className="px-4 py-2 bg-accent text-white rounded text-sm disabled:opacity-40"
             >
-              Create
+              {t("settings.create")}
             </button>
           </div>
           {orgMsg && (
@@ -145,16 +156,16 @@ export default function SettingsPage() {
         </div>
 
         {/* Reconciliation Config */}
-        <div className="border border-border rounded-lg p-5">
+        <div className={`${CARD} p-5`}>
           <h3 className="font-semibold text-sm mb-4">
-            Reconciliation Config
+            {t("settings.recon_config")}
           </h3>
 
           {formConfig ? (
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-medium mb-1">
-                  Quantity Tolerance (%)
+                  {t("settings.qty_tolerance")}
                 </label>
                 <input
                   type="number"
@@ -171,7 +182,7 @@ export default function SettingsPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium mb-1">
-                  Price Tolerance (%)
+                  {t("settings.price_tolerance")}
                 </label>
                 <input
                   type="number"
@@ -197,7 +208,7 @@ export default function SettingsPage() {
                     })
                   }
                 />
-                <label className="text-sm">Auto-resolve exact matches</label>
+                <label className="text-sm">{t("settings.auto_resolve_exact")}</label>
               </div>
               <div className="flex items-center gap-2">
                 <input
@@ -210,11 +221,11 @@ export default function SettingsPage() {
                     })
                   }
                 />
-                <label className="text-sm">AI matching layer enabled</label>
+                <label className="text-sm">{t("settings.ai_layer_enabled")}</label>
               </div>
               <div>
                 <label className="block text-xs font-medium mb-1">
-                  AI Max Tokens Per Run
+                  {t("settings.ai_max_tokens")}
                 </label>
                 <input
                   type="number"
@@ -233,7 +244,7 @@ export default function SettingsPage() {
                 onClick={saveConfig}
                 className="px-4 py-2 bg-accent text-white rounded text-sm"
               >
-                Save Config
+                {t("settings.save_config")}
               </button>
               {configMsg && (
                 <div className="text-xs text-zinc-500">{configMsg}</div>
@@ -242,8 +253,8 @@ export default function SettingsPage() {
           ) : (
             <div className="text-sm text-zinc-400">
               {orgId
-                ? "No config found for this org. Run a reconciliation first to auto-create defaults."
-                : "Select an organization."}
+                ? t("settings.no_config")
+                : t("settings.select_org")}
             </div>
           )}
         </div>

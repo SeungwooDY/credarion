@@ -35,6 +35,18 @@ class ConfigUpdate(BaseModel):
     ai_max_tokens_per_run: int | None = None
 
 
+class ApproveRequest(BaseModel):
+    """Confirm a matched result during human review."""
+    reviewer_id: str
+    note: str | None = None
+
+
+class RejectRequest(BaseModel):
+    """Flag a result as a discrepancy during human review. Reason is required."""
+    reviewer_id: str
+    reason: str
+
+
 # --- Response schemas ---
 
 
@@ -69,11 +81,25 @@ class ResultDetail(BaseModel):
     discrepancy_type: str | None = None
     confidence: float | None = None
     status: str
+    # --- Human review queue ---
+    confidence_score: int = 0
+    confidence_label: str | None = None
+    sort_priority: int = 99
+    discrepancy_note: str | None = None
+    amount: float | None = None
+    reviewer_id: str | None = None
+    reviewed_at: datetime | None = None
     resolution_note: str | None = None
     resolved_by: str | None = None
     resolved_at: datetime | None = None
     match_details: dict | None = None
     created_at: datetime
+
+
+class ReviewActionResponse(BaseModel):
+    """Minimal response for approve/reject actions."""
+    id: str
+    status: str
 
 
 class SupplierReconciliationSummary(BaseModel):
