@@ -6,9 +6,25 @@
   --color-muted: #f5f5fa;
   --color-border: #e4e4ef;
   --color-card: #ffffff;
-  --color-accent: #6c3ce0;
-  --color-accent-light: #ede5fc;
-  --color-accent-dark: #5626c9;
+  --color-card-foreground: #1a1a2e;
+  --color-accent: #4169E1;
+  --color-accent-light: #e3e9fb;
+  --color-accent-dark: #2f4fc0;
+  --color-accent-foreground: #ffffff;
+  /* Neutral tokens consumed by the shadcn/ui primitives (button, dropdown-menu,
+     avatar, badge, …). Mapped onto Credarion's palette so the primitives render
+     correctly under Tailwind v4's @theme. */
+  --color-primary: #4169E1;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #f5f5fa;
+  --color-secondary-foreground: #1a1a2e;
+  --color-muted-foreground: #6b7280;
+  --color-popover: #ffffff;
+  --color-popover-foreground: #1a1a2e;
+  --color-input: #e4e4ef;
+  --color-ring: #4169E1;
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #ffffff;
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }

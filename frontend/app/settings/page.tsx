@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import PageHeader from "../components/page-header";
 import { useCurrentOrg, useReconConfig } from "../lib/swr";
+import { CARD } from "@/app/lib/ui";
+import { useT } from "@/app/lib/i18n";
 
 interface ReconConfigForm {
   qty_tolerance_pct: number;
@@ -13,6 +15,7 @@ interface ReconConfigForm {
 }
 
 export default function SettingsPage() {
+  const t = useT();
   const { orgId, orgName } = useCurrentOrg();
   const { config, refreshConfig } = useReconConfig(orgId);
   const [formConfig, setFormConfig] = useState<ReconConfigForm | null>(null);
@@ -42,29 +45,29 @@ export default function SettingsPage() {
         body: JSON.stringify(formConfig),
       });
       if (res.ok) {
-        setConfigMsg("Saved");
+        setConfigMsg(t("settings.saved"));
         refreshConfig();
         setTimeout(() => setConfigMsg(""), 2000);
       } else {
         const err = await res.json();
-        setConfigMsg(`Error: ${err.detail}`);
+        setConfigMsg(t("settings.error_msg", { detail: err.detail }));
       }
     } catch {
-      setConfigMsg("Save failed");
+      setConfigMsg(t("settings.save_failed"));
     }
   }
 
   return (
     <>
       <PageHeader
-        title="Settings"
-        description="Your organization and reconciliation configuration"
+        title={t("settings.title")}
+        description={t("settings.description")}
       />
 
       <div className="grid grid-cols-2 gap-6">
         {/* Organization */}
-        <div className="border border-border rounded-lg p-5">
-          <h3 className="font-semibold text-sm mb-4">Organization</h3>
+        <div className={`${CARD} p-5`}>
+          <h3 className="font-semibold text-sm mb-4">{t("settings.organizations")}</h3>
           {orgId ? (
             <div className="flex items-center justify-between p-2 rounded text-sm bg-muted font-medium">
               <span>{orgName}</span>
@@ -74,22 +77,22 @@ export default function SettingsPage() {
             </div>
           ) : (
             <div className="text-sm text-zinc-400">
-              No organization is linked to your account yet.
+              {t("settings.select_org")}
             </div>
           )}
         </div>
 
         {/* Reconciliation Config */}
-        <div className="border border-border rounded-lg p-5">
+        <div className={`${CARD} p-5`}>
           <h3 className="font-semibold text-sm mb-4">
-            Reconciliation Config
+            {t("settings.recon_config")}
           </h3>
 
           {formConfig ? (
             <div className="space-y-4">
               <div>
                 <label className="block text-xs font-medium mb-1">
-                  Quantity Tolerance (%)
+                  {t("settings.qty_tolerance")}
                 </label>
                 <input
                   type="number"
@@ -106,7 +109,7 @@ export default function SettingsPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium mb-1">
-                  Price Tolerance (%)
+                  {t("settings.price_tolerance")}
                 </label>
                 <input
                   type="number"
@@ -132,7 +135,7 @@ export default function SettingsPage() {
                     })
                   }
                 />
-                <label className="text-sm">Auto-resolve exact matches</label>
+                <label className="text-sm">{t("settings.auto_resolve_exact")}</label>
               </div>
               <div className="flex items-center gap-2">
                 <input
@@ -145,11 +148,11 @@ export default function SettingsPage() {
                     })
                   }
                 />
-                <label className="text-sm">AI matching layer enabled</label>
+                <label className="text-sm">{t("settings.ai_layer_enabled")}</label>
               </div>
               <div>
                 <label className="block text-xs font-medium mb-1">
-                  AI Max Tokens Per Run
+                  {t("settings.ai_max_tokens")}
                 </label>
                 <input
                   type="number"
@@ -168,7 +171,7 @@ export default function SettingsPage() {
                 onClick={saveConfig}
                 className="px-4 py-2 bg-accent text-white rounded text-sm"
               >
-                Save Config
+                {t("settings.save_config")}
               </button>
               {configMsg && (
                 <div className="text-xs text-zinc-500">{configMsg}</div>
@@ -177,8 +180,8 @@ export default function SettingsPage() {
           ) : (
             <div className="text-sm text-zinc-400">
               {orgId
-                ? "No config found for this org. Run a reconciliation first to auto-create defaults."
-                : "No organization is linked to your account yet."}
+                ? t("settings.no_config")
+                : t("settings.select_org")}
             </div>
           )}
         </div>

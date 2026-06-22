@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import { useCurrentOrg } from "../lib/swr";
+import { useT } from "@/app/lib/i18n";
 
 interface Message {
   role: "user" | "assistant";
@@ -10,6 +11,7 @@ interface Message {
 }
 
 export default function ChatPanel() {
+  const t = useT();
   const { orgId: currentOrgId, orgName } = useCurrentOrg();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -132,7 +134,7 @@ export default function ChatPanel() {
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed bottom-6 right-6 w-12 h-12 rounded-full bg-gradient-to-br from-[#7c4dff] via-accent to-accent-dark text-white shadow-lg hover:shadow-xl transition-all flex items-center justify-center z-50 group"
+          className="fixed bottom-6 right-6 w-12 h-12 rounded-full bg-gradient-to-br from-[#5e82ec] via-accent to-accent-dark text-white shadow-lg hover:shadow-xl transition-all flex items-center justify-center z-50 group"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:scale-110 transition-transform">
             <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
@@ -151,14 +153,14 @@ export default function ChatPanel() {
           {/* Header — click anywhere to minimize */}
           <div
             onClick={() => setOpen(false)}
-            className="px-4 py-3 flex items-center justify-between shrink-0 bg-gradient-to-r from-[#7c4dff] via-accent to-accent-dark text-white rounded-t-2xl cursor-pointer select-none"
+            className="px-4 py-3 flex items-center justify-between shrink-0 bg-gradient-to-r from-[#5e82ec] via-accent to-accent-dark text-white rounded-t-2xl cursor-pointer select-none"
           >
             <div className="flex items-center gap-2.5">
               <div className="w-7 h-7 rounded-full bg-white/20 flex items-center justify-center text-xs font-bold">
                 C
               </div>
               <div>
-                <div className="text-sm font-semibold">Credarion Assistant</div>
+                <div className="text-sm font-semibold">{t("chat.title")}</div>
                 {orgName && (
                   <div className="text-[10px] opacity-70 truncate max-w-[200px]">
                     {orgName}
@@ -171,7 +173,7 @@ export default function ChatPanel() {
                 <button
                   onClick={(e) => { e.stopPropagation(); setMessages([]); }}
                   className="p-1.5 rounded-lg hover:bg-white/15 transition-colors"
-                  title="Clear chat"
+                  title={t("chat.clear_chat")}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="3 6 5 6 21 6" />
@@ -197,27 +199,30 @@ export default function ChatPanel() {
                     <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z" />
                   </svg>
                 </div>
-                <p className="text-sm font-medium text-zinc-700">Ask me anything</p>
+                <p className="text-sm font-medium text-zinc-700">{t("chat.ask_anything")}</p>
                 <p className="text-xs text-zinc-400 mt-1 max-w-[260px] mx-auto">
-                  I have access to your reconciliation data, invoices, and supplier records.
+                  {t("chat.empty_subtitle")}
                 </p>
                 <div className="mt-4 space-y-1.5">
                   {[
-                    "Summarize my reconciliation status",
-                    "Which suppliers have the most mismatches?",
-                    "What's the total amount at risk?",
-                  ].map((q) => (
-                    <button
-                      key={q}
-                      onClick={() => {
-                        setInput(q);
-                        setTimeout(() => inputRef.current?.focus(), 0);
-                      }}
-                      className="block w-full text-left px-3 py-2 text-xs text-zinc-600 bg-muted rounded-lg hover:bg-accent-light hover:text-accent transition-colors"
-                    >
-                      {q}
-                    </button>
-                  ))}
+                    "chat.suggest_status",
+                    "chat.suggest_mismatches",
+                    "chat.suggest_at_risk",
+                  ].map((key) => {
+                    const q = t(key);
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => {
+                          setInput(q);
+                          setTimeout(() => inputRef.current?.focus(), 0);
+                        }}
+                        className="block w-full text-left px-3 py-2 text-xs text-zinc-600 bg-muted rounded-lg hover:bg-accent-light hover:text-accent transition-colors"
+                      >
+                        {q}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -258,7 +263,7 @@ export default function ChatPanel() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask about your data..."
+                placeholder={t("chat.input_placeholder")}
                 rows={1}
                 className="flex-1 bg-transparent text-sm resize-none outline-none max-h-24 placeholder:text-zinc-400"
                 style={{
