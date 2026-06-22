@@ -233,23 +233,6 @@ export default function IngestionPage() {
         description={t("ingestion.description")}
       />
 
-      {/* Org selector */}
-      <div className="mb-6">
-        <label className="block text-sm font-medium mb-1">{t("ingestion.organization")}</label>
-        <select
-          value={orgId}
-          onChange={(e) => setOrgId(e.target.value)}
-          className="border border-border rounded-lg px-3 py-2 text-sm w-full max-w-sm bg-card focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
-        >
-          <option value="">{t("ingestion.select")}</option>
-          {orgs.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
       <div className="grid grid-cols-2 gap-6">
         {/* GRN Upload */}
         <div className={`${CARD} p-5`}>

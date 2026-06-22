@@ -508,20 +508,6 @@ export default function ReconciliationPage() {
       {/* Controls */}
       <div className="flex gap-4 items-end mb-6">
         <div>
-          <label className="block text-xs font-medium text-zinc-500 mb-1.5">
-            {t("reconciliation.organization")}
-          </label>
-          <select
-            value={orgId}
-            onChange={(e) => setOrgId(e.target.value)}
-            className="border border-border rounded-lg px-3 py-2 text-sm bg-card focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
-          >
-            {orgs.map((o) => (
-              <option key={o.id} value={o.id}>{o.name}</option>
-            ))}
-          </select>
-        </div>
-        <div>
           <label className="block text-xs font-medium text-zinc-500 mb-1.5">{t("common.period")}</label>
           <input
             type="text"

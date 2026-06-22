@@ -138,10 +138,14 @@ export interface DashboardSupplier {
   action_required: "review" | "upload" | "none";
 }
 
-/** GET /api/suppliers — full supplier overview for the dashboard. */
+/**
+ * GET /api/v1/reconciliation/dashboard — full supplier overview for the
+ * dashboard. The backend auto-selects the first org and the most recent period
+ * that has data, so no params are needed here.
+ */
 export function useSupplierOverview() {
   const { data, error, isLoading, mutate } = useSWR<DashboardSupplier[]>(
-    "/api/suppliers",
+    "/reconciliation/dashboard",
     fetcher,
     swrDefaults
   );

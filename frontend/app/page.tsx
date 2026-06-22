@@ -3,6 +3,9 @@
 import Link from "next/link";
 import { getLocalTimeZone } from "@internationalized/date";
 import PageHeader from "./components/page-header";
+import NotificationBell, {
+  type DashboardNotification,
+} from "./components/notification-bell";
 import { RoadmapCard, type RoadmapItem } from "@/components/ui/roadmap-card";
 import { CloseDatePicker } from "@/components/ui/close-date-picker";
 import { CARD } from "./lib/ui";
@@ -62,19 +65,9 @@ function Skeleton({ className = "" }: { className?: string }) {
 
 const LABEL = "text-xs uppercase tracking-wide text-gray-400";
 
-function InlineError({ message, onRetry }: { message: string; onRetry: () => void }) {
+function NoData() {
   const t = useT();
-  return (
-    <div className="text-sm text-red-600">
-      {message}{" "}
-      <button
-        onClick={onRetry}
-        className="font-medium underline underline-offset-2 hover:text-red-700"
-      >
-        {t("common.retry")}
-      </button>
-    </div>
-  );
+  return <div className="text-sm text-gray-400">{t("dashboard.no_data")}</div>;
 }
 
 function StatusPill({ status }: { status: SupplierStatus }) {
@@ -131,7 +124,7 @@ function StatCard({
 }: {
   label: string;
   children: React.ReactNode;
-  subtext: React.ReactNode;
+  subtext?: React.ReactNode;
   action?: React.ReactNode;
 }) {
   return (
@@ -139,7 +132,9 @@ function StatCard({
       {action && <div className="absolute right-2.5 top-2.5">{action}</div>}
       <div className={LABEL}>{label}</div>
       <div className="mt-2">{children}</div>
-      <div className="mt-1.5 text-xs text-gray-400">{subtext}</div>
+      {subtext != null && (
+        <div className="mt-1.5 text-xs text-gray-400">{subtext}</div>
+      )}
     </div>
   );
 }
@@ -148,8 +143,7 @@ function StatCard({
 
 export default function DashboardPage() {
   const t = useT();
-  const { suppliers, suppliersLoading, suppliersError, refreshSuppliers } =
-    useSupplierOverview();
+  const { suppliers, suppliersLoading, suppliersError } = useSupplierOverview();
 
   // Month-end close date (user-configurable, persisted) + countdown.
   // Client-only to avoid hydration drift.
@@ -171,7 +165,36 @@ export default function DashboardPage() {
   );
   const matchedPct = total > 0 ? (matched / total) * 100 : 0;
 
-  const queue = suppliers.filter((s) => s.status !== "matched");
+  // Suppliers whose statement hasn't been uploaded yet never get a row — they'd
+  // bury the dashboard under hundreds of un-actionable lines. The count is
+  // flagged via the notification bell instead. The list views stay focused on
+  // suppliers with real, money-bearing discrepancies (already sorted
+  // hottest-first by the backend).
+  const isAwaitingUpload = (s: DashboardSupplier) => s.action_required === "upload";
+  const overviewSuppliers = suppliers.filter((s) => !isAwaitingUpload(s));
+  const queue = overviewSuppliers.filter((s) => s.status !== "matched");
+  const awaitingUploadCount = suppliers.filter(isAwaitingUpload).length;
+
+  // Dashboard notifications (bell, top-right). The only flag right now is the
+  // pile of suppliers still missing statements; it turns urgent ≤5 days to close.
+  const closeIsNear = daysLeft != null && daysLeft <= 5;
+  const notifications: DashboardNotification[] = [];
+  if (awaitingUploadCount > 0) {
+    notifications.push({
+      id: "awaiting-upload",
+      title: t("dashboard.notif.awaiting_upload", { n: awaitingUploadCount }),
+      detail:
+        closeIsNear && daysLeft != null
+          ? t("dashboard.notif.awaiting_upload_urgent", { days: daysLeft })
+          : t("dashboard.notif.awaiting_upload_sub"),
+      tone: closeIsNear ? "urgent" : "warning",
+      href: "/ingestion",
+    });
+  }
+
+  // Once loading settles, treat both a fetch failure and an empty result as
+  // simply "no data" — the dashboard stays calm instead of showing red errors.
+  const noSupplierData = !suppliersLoading && (Boolean(suppliersError) || total === 0);
 
   // Month-end close pipeline. Supplier Reconciliation is the live stage (shows
   // matched/total); the rest unlock sequentially and stay "Not Started" for now.
@@ -187,18 +210,12 @@ export default function DashboardPage() {
     },
     {
       quarter: t("dashboard.step", { n: 2 }),
-      title: t("dashboard.stage.invoice_matching"),
-      description: t("dashboard.not_started"),
-      status: "upcoming",
-    },
-    {
-      quarter: t("dashboard.step", { n: 3 }),
       title: t("dashboard.stage.discrepancy_resolution"),
       description: t("dashboard.not_started"),
       status: "upcoming",
     },
     {
-      quarter: t("dashboard.step", { n: 4 }),
+      quarter: t("dashboard.step", { n: 3 }),
       title: t("dashboard.stage.cfo_signoff"),
       description: t("dashboard.not_started"),
       status: "upcoming",
@@ -219,6 +236,13 @@ export default function DashboardPage() {
       <PageHeader
         title={t("dashboard.title")}
         description={t("dashboard.subtitle")}
+        action={
+          <NotificationBell
+            notifications={notifications}
+            title={t("dashboard.notif.title")}
+            emptyLabel={t("dashboard.notif.empty")}
+          />
+        }
       />
 
       {/* ── Section 1: Stat cards ── */}
@@ -227,19 +251,17 @@ export default function DashboardPage() {
         <StatCard
           label={t("dashboard.card.suppliers_reconciled")}
           subtext={
-            suppliersError ? (
-              <span className="text-red-600">{t("dashboard.could_not_load")}</span>
-            ) : suppliersLoading ? (
+            suppliersLoading ? (
               <Skeleton className="h-3 w-24" />
-            ) : (
+            ) : noSupplierData ? null : (
               t("dashboard.pending_review", { n: pendingReview })
             )
           }
         >
-          {suppliersError ? (
-            <InlineError message={t("dashboard.err_supplier_data")} onRetry={refreshSuppliers} />
-          ) : suppliersLoading ? (
+          {suppliersLoading ? (
             <Skeleton className="h-9 w-28" />
+          ) : noSupplierData ? (
+            <NoData />
           ) : (
             <>
               <div className="text-3xl font-bold text-gray-800">
@@ -260,17 +282,17 @@ export default function DashboardPage() {
         <StatCard
           label={t("dashboard.card.discrepancy_value")}
           subtext={
-            suppliersLoading || suppliersError ? (
-              suppliersLoading ? <Skeleton className="h-3 w-24" /> : <span className="text-red-600">{t("dashboard.could_not_load")}</span>
-            ) : (
+            suppliersLoading ? (
+              <Skeleton className="h-3 w-24" />
+            ) : noSupplierData ? null : (
               t("dashboard.across_suppliers", { n: discrepancySuppliers.length })
             )
           }
         >
-          {suppliersError ? (
-            <InlineError message={t("dashboard.err_discrepancies")} onRetry={refreshSuppliers} />
-          ) : suppliersLoading ? (
+          {suppliersLoading ? (
             <Skeleton className="h-9 w-28" />
+          ) : noSupplierData ? (
+            <NoData />
           ) : (
             <div
               className={`text-3xl font-bold ${discrepancyValue > 0 ? "text-red-600" : "text-green-600"}`}
@@ -281,10 +303,7 @@ export default function DashboardPage() {
         </StatCard>
 
         {/* Card 3 — Invoice Processing (static placeholder, Phase 2) */}
-        <StatCard
-          label={t("dashboard.card.invoices")}
-          subtext={t("dashboard.invoices_phase2_sub")}
-        >
+        <StatCard label={t("dashboard.card.invoices")}>
           <div className="flex items-center gap-2">
             <span className="text-2xl font-bold text-gray-300">—</span>
             <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-500">
@@ -330,11 +349,7 @@ export default function DashboardPage() {
           <h3 className="text-base font-semibold text-gray-800">{t("dashboard.needs_attention")}</h3>
         </div>
 
-        {suppliersError ? (
-          <div className="px-5 py-6">
-            <InlineError message={t("dashboard.err_supplier_data")} onRetry={refreshSuppliers} />
-          </div>
-        ) : suppliersLoading ? (
+        {suppliersLoading ? (
           <div>
             {[0, 1, 2, 3].map((i) => (
               <div key={i} className="flex items-center gap-3 border-b border-gray-100 px-5 py-4 last:border-b-0">
@@ -346,6 +361,10 @@ export default function DashboardPage() {
                 <Skeleton className="h-7 w-16" />
               </div>
             ))}
+          </div>
+        ) : noSupplierData ? (
+          <div className="px-5 py-8 text-center text-sm text-gray-400">
+            {t("dashboard.no_data")}
           </div>
         ) : queue.length === 0 ? (
           <div className="px-5 py-8 text-center text-sm text-gray-400">
@@ -395,9 +414,13 @@ export default function DashboardPage() {
           <h3 className="text-base font-semibold text-gray-800">{t("dashboard.supplier_overview")}</h3>
         </div>
 
-        {suppliersError ? (
-          <div className="px-5 py-6">
-            <InlineError message={t("dashboard.err_supplier_data")} onRetry={refreshSuppliers} />
+        {noSupplierData ? (
+          <div className="px-5 py-8 text-center text-sm text-gray-400">
+            {t("dashboard.no_data")}
+          </div>
+        ) : !suppliersLoading && overviewSuppliers.length === 0 ? (
+          <div className="px-5 py-8 text-center text-sm text-gray-400">
+            {t("dashboard.all_reconciled")}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -425,7 +448,7 @@ export default function DashboardPage() {
                     </tr>
                   ))
                 ) : (
-                  suppliers.map((s) => {
+                  overviewSuppliers.map((s) => {
                     const hasDiscrepancy = (s.discrepancy_value ?? 0) > 0;
                     return (
                       <tr
