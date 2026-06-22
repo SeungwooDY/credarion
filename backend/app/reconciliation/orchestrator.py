@@ -150,26 +150,155 @@ def _stmt_to_item(line: StatementLineItem) -> StatementItem:
     )
 
 
+# --- Review-queue classification --------------------------------------------
+#
+# Nothing auto-matches. Every matched pair is queued for human review
+# (status="pending_review"); items with no match are flagged "unmatched".
+# Each result is scored and assigned a sort_priority so the review UI can show
+# the highest-confidence work first (1 = highest, 6 = no match).
+
+REVIEW_PENDING = "pending_review"
+REVIEW_UNMATCHED = "unmatched"
+
+# review match_type -> (confidence_score, confidence_label, sort_priority).
+# AI overrides the score with the model's own confidence (label/priority fixed).
+# Layer 2.5 "aggregate" and Layer 3 "multi_po_dn" share the "Aggregated Match"
+# bucket (sort_priority 4) per the review spec.
+_REVIEW_META: dict[str, tuple[int, str, int]] = {
+    "exact": (100, "Exact Match", 1),
+    "near_exact": (92, "High Confidence — Small Discrepancy", 2),
+    "fuzzy": (75, "Probable Match", 3),
+    "aggregate": (70, "Aggregated Match", 4),
+    "multi_po_dn": (70, "Aggregated Match", 4),
+    "ai": (0, "AI Suggested — Careful Review", 5),
+    "unmatched": (0, "No Match Found", 6),
+}
+
+# Default for any unexpected match_type — treat as careful-review AI tier.
+_REVIEW_FALLBACK = (0, "AI Suggested — Careful Review", 5)
+
+# Spec band for the "Small Discrepancy" / score-92 bucket: both deltas <= 0.5%.
+NEAR_EXACT_TOLERANCE_PCT = 0.5
+
+
+def _pct(delta: Decimal | None, base: Decimal | None) -> float:
+    """Percentage magnitude of delta relative to the ERP base. 0 if base is 0/None."""
+    if not base or delta is None:
+        return 0.0
+    try:
+        return float(abs(delta) / abs(base) * 100)
+    except (ZeroDivisionError, ArithmeticError):
+        return 0.0
+
+
+def _discrepancy_note(match: MatchResult, in_tolerance: bool) -> str:
+    """Inline discrepancy note shown to the accountant for an exact-key match.
+
+    Uses the exact spec wording for the in-tolerance (<=0.5%) case; a distinct
+    wording for larger deltas so a material discrepancy is never described as
+    "small / likely rounding".
+    """
+    erp, stmt = match.erp, match.statement
+    qty_delta = match.quantity_delta if match.quantity_delta is not None else Decimal("0")
+    price_delta = match.price_delta if match.price_delta is not None else Decimal("0")
+    qty_pct = _pct(qty_delta, erp.quantity)
+    price_pct = _pct(price_delta, erp.po_price)
+    body = (
+        f"Quantity: ERP {erp.quantity} vs Supplier {stmt.quantity} "
+        f"(delta: {qty_delta} units, {qty_pct:.2f}%). "
+        f"Price: ERP {erp.po_price} vs Supplier {stmt.unit_price} "
+        f"(delta: {float(price_delta):.4f}, {price_pct:.2f}%). "
+    )
+    if in_tolerance:
+        return (
+            "Small discrepancy detected. " + body
+            + "Likely rounding or minor data entry difference — confirm with supplier."
+        )
+    return (
+        "Discrepancy detected. " + body
+        + "Exceeds the 0.5% tolerance — review carefully before confirming."
+    )
+
+
+def _classify_review(match: MatchResult) -> dict[str, Any]:
+    """Map a matched MatchResult to its review-queue fields.
+
+    Splits Layer-1 'exact' matches into 'exact' (deltas exactly zero) vs
+    'near_exact' (any nonzero qty/price delta). Within near_exact, deltas inside
+    the 0.5% band keep the "Small Discrepancy" label/score 92; larger deltas stay
+    in the same priority-2 attention queue but are labelled accurately with a
+    lower score (never auto-confirmable). All other layers keep their match_type
+    and are queued for review unchanged.
+    """
+    review_type = match.match_type
+    in_tolerance = True
+    if review_type == "exact":
+        qd = match.quantity_delta if match.quantity_delta is not None else Decimal("0")
+        pd = match.price_delta if match.price_delta is not None else Decimal("0")
+        if qd != 0 or pd != 0:
+            review_type = "near_exact"
+            in_tolerance = (
+                _pct(qd, match.erp.quantity) <= NEAR_EXACT_TOLERANCE_PCT
+                and _pct(pd, match.erp.po_price) <= NEAR_EXACT_TOLERANCE_PCT
+            )
+
+    score, label, priority = _REVIEW_META.get(review_type, _REVIEW_FALLBACK)
+
+    # AI score comes from the model's own confidence (0-1 -> 0-100).
+    if review_type == "ai" and match.confidence is not None:
+        score = max(0, min(100, round(float(match.confidence) * 100)))
+
+    note: str | None = None
+    if review_type == "near_exact":
+        note = _discrepancy_note(match, in_tolerance)
+        if not in_tolerance:
+            score, label = 80, "High Confidence — Discrepancy"
+
+    return {
+        "match_type": review_type,
+        "status": REVIEW_PENDING,
+        "confidence_score": score,
+        "confidence_label": label,
+        "sort_priority": priority,
+        "discrepancy_note": note,
+    }
+
+
+def _line_amount(match: MatchResult) -> float:
+    """Transaction amount used to sort the review queue (largest value first).
+
+    Prefers the supplier statement amount, falling back to the ERP amount.
+    """
+    amt = match.statement.amount if match.statement.amount is not None else match.erp.amount
+    return float(amt) if amt is not None else 0.0
+
+
 def _match_to_result(
     match: MatchResult,
     run_id: Any,
     supplier_id: Any,
     period: str,
 ) -> ReconciliationResult:
+    review = _classify_review(match)
+    details = {**(match.match_details or {}), "amount": _line_amount(match)}
     return ReconciliationResult(
         run_id=run_id,
         supplier_id=supplier_id,
         period=period,
         erp_record_id=match.erp.erp_id,
         statement_line_id=match.statement.line_id,
-        match_type=match.match_type,
+        match_type=review["match_type"],
         quantity_delta=match.quantity_delta,
         price_delta=match.price_delta,
         amount_delta=match.amount_delta,
         discrepancy_type=match.discrepancy_type,
         confidence=match.confidence,
-        status=match.status,
-        match_details=match.match_details,
+        status=review["status"],
+        confidence_score=review["confidence_score"],
+        confidence_label=review["confidence_label"],
+        sort_priority=review["sort_priority"],
+        discrepancy_note=review["discrepancy_note"],
+        match_details=details,
     )
 
 
@@ -439,9 +568,16 @@ async def run_reconciliation(
                 period=period,
                 erp_record_id=erp.erp_id,
                 match_type="unmatched",
-                status="discrepancy",
+                status=REVIEW_UNMATCHED,
                 discrepancy_type="missing_from_statement",
-                match_details={"layer": "unmatched", "side": "erp"},
+                confidence_score=0,
+                confidence_label="No Match Found",
+                sort_priority=6,
+                match_details={
+                    "layer": "unmatched",
+                    "side": "erp",
+                    "amount": float(erp.amount) if erp.amount is not None else 0.0,
+                },
             ))
 
         # Create unmatched results for remaining statement items
@@ -452,9 +588,16 @@ async def run_reconciliation(
                 period=period,
                 statement_line_id=stmt.line_id,
                 match_type="unmatched",
-                status="discrepancy",
+                status=REVIEW_UNMATCHED,
                 discrepancy_type="missing_from_erp",
-                match_details={"layer": "unmatched", "side": "statement"},
+                confidence_score=0,
+                confidence_label="No Match Found",
+                sort_priority=6,
+                match_details={
+                    "layer": "unmatched",
+                    "side": "statement",
+                    "amount": float(stmt.amount) if stmt.amount is not None else 0.0,
+                },
             ))
 
         # Final summary
@@ -480,9 +623,11 @@ async def run_reconciliation(
         # Bulk insert results
         db.add_all(all_results)
 
-        # Update run stats
-        matched = sum(1 for r in all_results if r.status == "matched")
-        discrepancy = sum(1 for r in all_results if r.status == "discrepancy")
+        # Update run stats. Nothing auto-matches now, so "matched" means a pair
+        # was found and queued for review; "discrepancy" means that pair (or an
+        # unmatched leftover) carries a discrepancy_type worth flagging.
+        matched = sum(1 for r in all_results if r.match_type != "unmatched")
+        discrepancy = sum(1 for r in all_results if r.discrepancy_type is not None)
         unmatched = sum(1 for r in all_results if r.match_type == "unmatched")
 
         # Match rate is statement-centric: how well can we verify the supplier's
@@ -490,7 +635,7 @@ async def run_reconciliation(
         # and don't drag down the rate.
         stmt_matched = sum(
             1 for r in all_results
-            if r.status == "matched" and r.statement_line_id is not None
+            if r.match_type != "unmatched" and r.statement_line_id is not None
         )
         stmt_total = run.total_statement  # total statement line items
         unmatched_erp_count = sum(
