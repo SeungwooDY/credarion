@@ -600,7 +600,7 @@ function SupplierCard({
                       <td className="px-3 py-2 text-center">
                         {isResolved ? (
                           <span
-                            className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 cursor-help"
+                            className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 cursor-help capitalize"
                             title={item.resolution_note || ""}
                           >
                             {t("mismatches.resolved")}
