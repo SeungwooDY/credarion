@@ -48,6 +48,39 @@ class Organization(Base):
     erp_records: Mapped[list["ERPRecord"]] = relationship(back_populates="organization")
 
 
+class AccountingPeriod(Base):
+    """A per-org monthly container (e.g. "2026-07").
+
+    The canonical scoping key across the app is the `period` string ("YYYY-MM"),
+    already carried by supplier_statements, reconciliation_runs/results and (now)
+    erp_records and invoices. This table is the registry of which months exist for
+    an org — it powers the month tabs and the "Create period" action, and gives
+    each month a status for a future close/lock workflow.
+    """
+
+    __tablename__ = "accounting_periods"
+    __table_args__ = (
+        UniqueConstraint("org_id", "period", name="uq_accounting_periods_org_period"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    period: Mapped[str] = mapped_column(String, nullable=False)  # "2026-07"
+    label: Mapped[str] = mapped_column(String, nullable=False)  # "July 2026"
+    # status: open | closed  (closed/lock enforcement is a future fast-follow)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="open")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    organization: Mapped[Organization] = relationship()
+
+
 class Supplier(Base):
     __tablename__ = "suppliers"
     __table_args__ = (
@@ -97,6 +130,11 @@ class ERPRecord(Base):
     grn_date: Mapped[datetime] = mapped_column(DateTime(timezone=False), nullable=False)
     delivery_order: Mapped[str | None] = mapped_column(String, nullable=True)
     delivery_note: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+
+    # Accounting month this row belongs to ("YYYY-MM"). Stamped from the upload
+    # period at ingest time (not inferred from grn_date) so a month's ERP stays
+    # in that month. Nullable for pre-period rows; backfilled in migration 0006.
+    period: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
 
     source_file: Mapped[str] = mapped_column(String, nullable=False)
     raw_row: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
@@ -313,6 +351,10 @@ class Invoice(Base):
     invoice_number: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     invoice_date: Mapped[date | None] = mapped_column(nullable=True)
     due_date: Mapped[date | None] = mapped_column(nullable=True)
+
+    # Accounting month this invoice belongs to ("YYYY-MM"), stamped at upload from
+    # the active period. Nullable; backfilled from invoice_date in migration 0006.
+    period: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
 
     subtotal: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     vat_rate: Mapped[Decimal | None] = mapped_column(Numeric(5, 2), nullable=True)

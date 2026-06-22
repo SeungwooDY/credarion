@@ -121,18 +121,15 @@ async def list_suppliers_with_readiness(
     Uses bulk queries for performance with large supplier lists.
     """
     from sqlalchemy import case, literal_column
-    from app.reconciliation.orchestrator import _period_date_range
 
-    period_start, period_end = _period_date_range(period)
-
-    # Bulk query: ERP counts per supplier
+    # Bulk query: ERP counts per supplier. ERP rows are scoped by the period tag
+    # (stamped at ingest), matching how statements/runs are scoped below.
     erp_counts = dict(
         db.query(ERPRecord.supplier_id, func.count(ERPRecord.id))
         .join(Supplier, ERPRecord.supplier_id == Supplier.id)
         .filter(
             Supplier.org_id == org_id,
-            ERPRecord.grn_date >= period_start,
-            ERPRecord.grn_date <= period_end,
+            ERPRecord.period == period,
         )
         .group_by(ERPRecord.supplier_id)
         .all()
@@ -524,9 +521,7 @@ async def list_mismatches(
     Each supplier entry includes summary counts and individual mismatch items
     with PO number, material number, quantities, prices, and amounts from both sides.
     """
-    from app.reconciliation.orchestrator import _period_date_range
-
-    # Find the latest run per supplier for this period
+    # Find the latest run per supplier for this period (scoped by period tag).
     latest_runs_q = (
         db.query(ReconciliationRun)
         .join(Supplier, ReconciliationRun.supplier_id == Supplier.id)

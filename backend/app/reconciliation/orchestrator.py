@@ -303,7 +303,11 @@ def _match_to_result(
 
 
 def _period_date_range(period: str) -> tuple[datetime, datetime]:
-    """Convert 'YYYY-MM' period to (first_day, last_day) datetime range."""
+    """Convert 'YYYY-MM' period to (first_day, last_day) datetime range.
+
+    No longer used to filter ERP rows (those are scoped by the explicit period
+    tag now), but kept as a utility for the period's calendar bounds.
+    """
     year, month = int(period[:4]), int(period[5:7])
     last_day = calendar.monthrange(year, month)[1]
     start = datetime(year, month, 1)
@@ -341,20 +345,19 @@ async def run_reconciliation(
     db.flush()
 
     try:
-        # Load ERP records for supplier+period
-        period_start, period_end = _period_date_range(period)
+        # Load ERP records for supplier+period. ERP rows are stamped with the
+        # accounting period at ingest time, so we match the period tag directly
+        # (consistent with how supplier statements are scoped below).
         logger.info(
-            "[RECON DEBUG] Starting reconciliation: supplier_id=%s, period=%s, "
-            "date_range=%s to %s",
-            supplier_id, period, period_start, period_end,
+            "[RECON DEBUG] Starting reconciliation: supplier_id=%s, period=%s",
+            supplier_id, period,
         )
 
         erp_records = (
             db.query(ERPRecord)
             .filter(
                 ERPRecord.supplier_id == supplier_id,
-                ERPRecord.grn_date >= period_start,
-                ERPRecord.grn_date <= period_end,
+                ERPRecord.period == period,
             )
             .all()
         )

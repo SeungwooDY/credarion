@@ -3,7 +3,8 @@
 import { useEffect, useState, useRef } from "react";
 import { ChevronDown, ChevronRight, Check, Flag } from "lucide-react";
 import PageHeader from "../components/page-header";
-import { useOrgs, useSuppliers, type ReviewItem, type SupplierReady } from "../lib/swr";
+import { useSuppliers, type ReviewItem, type SupplierReady } from "../lib/swr";
+import { useOrgPeriod } from "../lib/period";
 import { CARD } from "@/app/lib/ui";
 import { useT, type TFunction } from "@/app/lib/i18n";
 import { Button } from "@/components/ui/button";
@@ -361,9 +362,7 @@ function SupplierRow({
 
 export default function ReconciliationPage() {
   const t = useT();
-  const { orgs } = useOrgs();
-  const [orgId, setOrgId] = useState("");
-  const [period, setPeriod] = useState("2026-03");
+  const { orgId, period } = useOrgPeriod();
   const { suppliers, suppliersLoading, refreshSuppliers } = useSuppliers(orgId, period);
 
   const [supplierId, setSupplierId] = useState("");
@@ -375,10 +374,6 @@ export default function ReconciliationPage() {
   const [collapsed, setCollapsed] = useState<Record<number, boolean>>({});
   const [reviewedCollapsed, setReviewedCollapsed] = useState(true);
   const [rejectTarget, setRejectTarget] = useState<ReviewItem | null>(null);
-
-  useEffect(() => {
-    if (orgs.length > 0 && !orgId) setOrgId(orgs[0].id);
-  }, [orgs, orgId]);
 
   async function loadQueue(sid: string, initCollapse = false) {
     if (!sid || !period) return;
@@ -504,33 +499,6 @@ export default function ReconciliationPage() {
         title={t("reconciliation.title")}
         description={t("reconciliation.description")}
       />
-
-      {/* Controls */}
-      <div className="flex gap-4 items-end mb-6">
-        <div>
-          <label className="block text-xs font-medium text-zinc-500 mb-1.5">
-            {t("reconciliation.organization")}
-          </label>
-          <select
-            value={orgId}
-            onChange={(e) => setOrgId(e.target.value)}
-            className="border border-border rounded-lg px-3 py-2 text-sm bg-card focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
-          >
-            {orgs.map((o) => (
-              <option key={o.id} value={o.id}>{o.name}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-zinc-500 mb-1.5">{t("common.period")}</label>
-          <input
-            type="text"
-            value={period}
-            onChange={(e) => setPeriod(e.target.value)}
-            className="border border-border rounded-lg px-3 py-2 text-sm bg-card w-28 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
-          />
-        </div>
-      </div>
 
       {/* Supplier readiness + breakdown table */}
       <div className={`${CARD} overflow-hidden mb-6`}>

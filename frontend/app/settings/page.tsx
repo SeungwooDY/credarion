@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import PageHeader from "../components/page-header";
 import { useOrgs, useReconConfig } from "../lib/swr";
+import { useOrgPeriod } from "../lib/period";
 import { CARD } from "@/app/lib/ui";
 import { useT } from "@/app/lib/i18n";
 
@@ -17,7 +18,7 @@ interface ReconConfigForm {
 export default function SettingsPage() {
   const t = useT();
   const { orgs, refreshOrgs } = useOrgs();
-  const [orgId, setOrgId] = useState("");
+  const { orgId, setOrgId } = useOrgPeriod();
   const [newOrgName, setNewOrgName] = useState("");
   const [orgMsg, setOrgMsg] = useState("");
   const { config, refreshConfig } = useReconConfig(orgId);

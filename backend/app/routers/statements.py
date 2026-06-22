@@ -17,6 +17,7 @@ from app.ingestion.column_mapping import try_alias_mapping
 from app.ingestion.header_detection import clean_header_cells, detect_header_row
 from app.ingestion.statement_ingestor import IngestionResult, ingest_supplier_statement
 from app.models import ERPRecord, StatementLineItem, Supplier, SupplierColumnMapping, SupplierStatement
+from app.periods import ensure_period
 
 router = APIRouter(prefix="/api/v1/statements", tags=["statements"])
 
@@ -207,6 +208,15 @@ async def upload_statement(
 
     Returns 201 on success, 202 if column mapping needs human review.
     """
+    # Ensure the accounting period registry row exists for this supplier's org.
+    supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+    if not supplier:
+        raise HTTPException(status_code=404, detail=f"Supplier {supplier_id} not found")
+    try:
+        ensure_period(db, supplier.org_id, period)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     existing = _find_existing(supplier_id, period, db)
     if existing and not replace:
         raise HTTPException(

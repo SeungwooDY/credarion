@@ -33,12 +33,14 @@ class GRNIngestionResponse(BaseModel):
 async def upload_grn(
     file: UploadFile = File(...),
     org_id: uuid.UUID = Form(...),
+    period: str = Form(...),
     db: Session = Depends(get_db),
 ) -> GRNIngestionResponse:
     """Upload an SGWERP GRN export file for ingestion.
 
     Accepts .csv, .xlsx, or .xls files. Automatically maps columns,
-    upserts suppliers, normalizes data, and inserts erp_records.
+    upserts suppliers, normalizes data, and inserts erp_records — every row
+    stamped with the given accounting period ("YYYY-MM").
     """
     suffix = (
         "." + file.filename.rsplit(".", 1)[-1]
@@ -52,6 +54,7 @@ async def upload_grn(
     result: GRNIngestionResult = ingest_grn(
         file_path=tmp_path,
         org_id=org_id,
+        period=period,
         db=db,
     )
 
@@ -75,6 +78,7 @@ async def upload_grn(
 async def upload_grn_stream(
     file: UploadFile = File(...),
     org_id: uuid.UUID = Form(...),
+    period: str = Form(...),
 ) -> StreamingResponse:
     """Upload GRN with SSE progress events.
 
@@ -104,7 +108,9 @@ async def upload_grn_stream(
     def run_ingestion() -> None:
         db = SessionLocal()
         try:
-            result = ingest_grn(file_path=tmp_path, org_id=org_id, db=db, on_progress=on_progress)
+            result = ingest_grn(
+                file_path=tmp_path, org_id=org_id, period=period, db=db, on_progress=on_progress
+            )
             progress_queue.put({
                 "type": "result",
                 "status": result.status,

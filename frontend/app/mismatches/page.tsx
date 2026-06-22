@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import PageHeader from "../components/page-header";
 import StatusBadge from "../components/status-badge";
 import SpreadsheetGrid, { type GridColumn, type GridRow } from "../components/spreadsheet-grid";
-import { useOrgs, useMismatches } from "../lib/swr";
+import { useMismatches } from "../lib/swr";
+import { useOrgPeriod } from "../lib/period";
 import { RippleButton } from "@/components/ui/multi-type-ripple-buttons";
 import { CARD } from "@/app/lib/ui";
 import { useT, type TFunction } from "@/app/lib/i18n";
@@ -912,18 +913,11 @@ function SpreadsheetView({
 
 export default function MismatchesPage() {
   const t = useT();
-  const { orgs } = useOrgs();
-  const [orgId, setOrgId] = useState("");
-  const [period, setPeriod] = useState("2026-03");
+  const { orgId, period } = useOrgPeriod();
   const { data, mismatchesLoading: loading, mismatchesError, refreshMismatches } = useMismatches(orgId, period);
   const error = mismatchesError?.message ?? "";
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<ViewMode>("review");
-
-  useEffect(() => {
-    if (orgs.length > 0 && !orgId) setOrgId(orgs[0].id);
-  }, [orgs, orgId]);
-
 
   function toggleExpand(supplierId: string) {
     setExpanded((prev) => {
@@ -962,28 +956,6 @@ export default function MismatchesPage() {
 
       {/* Controls */}
       <div className="flex gap-4 items-end mb-6">
-        <div>
-          <label className="block text-xs font-medium mb-1">{t("mismatches.organization")}</label>
-          <select
-            value={orgId}
-            onChange={(e) => setOrgId(e.target.value)}
-            className="border border-border rounded-lg px-3 py-2 text-sm bg-card focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
-          >
-            {orgs.map((o) => (
-              <option key={o.id} value={o.id}>{o.name}</option>
-            ))}
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium mb-1">{t("common.period")}</label>
-          <input
-            type="text"
-            value={period}
-            onChange={(e) => setPeriod(e.target.value)}
-            className="border border-border rounded-lg px-3 py-2 text-sm bg-card w-28 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
-          />
-        </div>
-
         {/* View mode toggle */}
         {!loading && data.length > 0 && (
           <div className="ml-auto flex rounded-lg border border-border overflow-hidden">
