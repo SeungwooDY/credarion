@@ -422,8 +422,8 @@ def test_classify_fuzzy():
     assert r["discrepancy_note"] is None
 
 
-def test_classify_aggregate_and_multi_po_dn_share_bucket():
-    for mt in ("aggregate", "multi_po_dn"):
+def test_classify_aggregate_and_multi_delivery_share_bucket():
+    for mt in ("aggregate", "multi_delivery", "multi_po_dn"):
         r = orch._classify_review(_match(mt, "0", "0"))
         assert r["confidence_score"] == 70
         assert r["confidence_label"] == "Aggregated Match"

@@ -257,7 +257,8 @@ class ReconciliationResult(Base):
         nullable=True,
     )
 
-    # match_type: exact | near_exact | fuzzy | aggregate | multi_po_dn | ai | unmatched
+    # match_type: exact | near_exact | fuzzy | aggregate | multi_delivery | ai | unmatched
+    #             (legacy rows may still carry multi_po_dn from the old Layer 3)
     match_type: Mapped[str] = mapped_column(String, nullable=False)
     quantity_delta: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
     price_delta: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)

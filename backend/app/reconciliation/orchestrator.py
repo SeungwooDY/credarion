@@ -33,7 +33,7 @@ from app.reconciliation.exact_match import (
     run_exact_match,
 )
 from app.reconciliation.fuzzy_match import run_fuzzy_match
-from app.reconciliation.multi_po_dn import run_multi_po_dn_match
+from app.reconciliation.multi_delivery import run_multi_delivery_match
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +43,7 @@ def _split_by_balance(
     stmt_items: list[StatementItem],
 ) -> tuple[
     list[MatchCandidate], list[StatementItem],  # balanced (for 1:1 matching)
-    list[MatchCandidate], list[StatementItem],  # imbalanced (for aggregate matching)
+    list[MatchCandidate], list[StatementItem],  # imbalanced (for aggregation: Layer 3 then fallback)
 ]:
     """Pre-split items into balanced and imbalanced groups.
 
@@ -53,7 +53,8 @@ def _split_by_balance(
     deliveries, ERP consolidates into fewer GRN receipts).
 
     Balanced: stmt line count <= ERP record count for the PO+PN → 1:1 matching
-    Imbalanced: stmt line count > ERP record count → aggregate matching
+    Imbalanced: stmt line count > ERP record count → aggregation (Layer 3 first,
+    then the aggregate fallback)
     """
     # Group by PO+PN composite key
     erp_by_key: dict[tuple[str, str], list[MatchCandidate]] = defaultdict(list)
@@ -162,13 +163,15 @@ REVIEW_UNMATCHED = "unmatched"
 
 # review match_type -> (confidence_score, confidence_label, sort_priority).
 # AI overrides the score with the model's own confidence (label/priority fixed).
-# Layer 2.5 "aggregate" and Layer 3 "multi_po_dn" share the "Aggregated Match"
-# bucket (sort_priority 4) per the review spec.
+# Layer 2.5 "aggregate" and Layer 3 "multi_delivery" share the "Aggregated Match"
+# bucket (sort_priority 4) per the review spec. "multi_po_dn" is retained so any
+# historical rows from the previous Layer 3 still classify into the same bucket.
 _REVIEW_META: dict[str, tuple[int, str, int]] = {
     "exact": (100, "Exact Match", 1),
     "near_exact": (92, "High Confidence — Small Discrepancy", 2),
     "fuzzy": (75, "Probable Match", 3),
     "aggregate": (70, "Aggregated Match", 4),
+    "multi_delivery": (70, "Aggregated Match", 4),
     "multi_po_dn": (70, "Aggregated Match", 4),
     "ai": (0, "AI Suggested — Careful Review", 5),
     "unmatched": (0, "No Match Found", 6),
@@ -298,6 +301,9 @@ def _match_to_result(
         confidence_label=review["confidence_label"],
         sort_priority=review["sort_priority"],
         discrepancy_note=review["discrepancy_note"],
+        # A layer may pre-populate a resolution_note (e.g. Layer 3 marks a group
+        # with "price inconsistency across deliveries"); carry it through.
+        resolution_note=details.get("resolution_note"),
         match_details=details,
     )
 
@@ -318,7 +324,7 @@ async def run_reconciliation(
 ) -> ReconciliationRun:
     """Execute reconciliation for a supplier+period.
 
-    Waterfall: Layer 1 (exact) → Layer 2 (fuzzy) → Layer 3 (DN aggregation) → Layer 4 (AI).
+    Waterfall: Layer 1 (exact) → Layer 2 (fuzzy) → Layer 3 (multi-delivery aggregation) → Layer 4 (AI).
     """
     # Verify supplier exists
     supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
@@ -461,7 +467,7 @@ async def run_reconciliation(
         all_results: list[ReconciliationResult] = []
 
         # Pre-split: route imbalanced PO groups (more stmt lines than ERP
-        # records) directly to aggregate matching instead of 1:1 matching.
+        # records) directly to aggregation (Layer 3 first) instead of 1:1 matching.
         balanced_erp, balanced_stmt, imbalanced_erp, imbalanced_stmt = (
             _split_by_balance(erp_candidates, stmt_items)
         )
@@ -502,37 +508,43 @@ async def run_reconciliation(
         for m in l2_matches:
             all_results.append(_match_to_result(m, run.id, supplier_id, period))
 
-        # Layer 2.5: Aggregate match — handles imbalanced PO groups plus
-        # any remaining unmatched from L1/L2
-        aggregate_erp = imbalanced_erp + unmatched_erp
-        aggregate_stmt = imbalanced_stmt + unmatched_stmt
+        # Layer 3: Multi-delivery aggregation — runs FIRST so the discrepancy-aware
+        # layer adjudicates every (po_number, material_number) group (summing each
+        # side, checking qty + amount within tolerance, guarding ERP price drift)
+        # before the always-"matched" aggregate fallback can mask it. Receives the
+        # imbalanced PO groups plus anything L1/L2 left unmatched.
+        l3_input_erp = imbalanced_erp + unmatched_erp
+        l3_input_stmt = imbalanced_stmt + unmatched_stmt
         logger.info(
-            "[RECON DEBUG] Layer 2.5 input: %d ERP (%d imbalanced + %d L2 leftover), "
+            "[RECON DEBUG] Layer 3 input: %d ERP (%d imbalanced + %d L2 leftover), "
             "%d stmt (%d imbalanced + %d L2 leftover)",
-            len(aggregate_erp), len(imbalanced_erp), len(unmatched_erp),
-            len(aggregate_stmt), len(imbalanced_stmt), len(unmatched_stmt),
+            len(l3_input_erp), len(imbalanced_erp), len(unmatched_erp),
+            len(l3_input_stmt), len(imbalanced_stmt), len(unmatched_stmt),
         )
-        l25_matches, unmatched_erp, unmatched_stmt = run_aggregate_match(
-            aggregate_erp, aggregate_stmt, qty_tol, price_tol
-        )
-        logger.info(
-            "[RECON DEBUG] Layer 2.5 (aggregate): %d matches, "
-            "%d ERP unmatched, %d stmt unmatched",
-            len(l25_matches), len(unmatched_erp), len(unmatched_stmt),
-        )
-        for m in l25_matches:
-            all_results.append(_match_to_result(m, run.id, supplier_id, period))
-
-        # Layer 3: Multi-PO delivery note aggregation
-        l3_matches, unmatched_erp, unmatched_stmt = run_multi_po_dn_match(
-            unmatched_erp, unmatched_stmt, qty_tol, price_tol
+        l3_matches, unmatched_erp, unmatched_stmt = run_multi_delivery_match(
+            l3_input_erp, l3_input_stmt, qty_tol, price_tol
         )
         logger.info(
-            "[RECON DEBUG] Layer 3 (DN aggregation): %d matches, "
+            "[RECON DEBUG] Layer 3 (multi-delivery aggregation): %d matches, "
             "%d ERP unmatched, %d stmt unmatched",
             len(l3_matches), len(unmatched_erp), len(unmatched_stmt),
         )
         for m in l3_matches:
+            all_results.append(_match_to_result(m, run.id, supplier_id, period))
+
+        # Layer 3.5: Aggregate fallback — mops up what Layer 3 could not group on a
+        # strict (po, material) key, chiefly PO-level cross-material reconciliation
+        # (ERP and supplier using different material codes for the same parts). Runs
+        # on Layer 3's leftovers.
+        l25_matches, unmatched_erp, unmatched_stmt = run_aggregate_match(
+            unmatched_erp, unmatched_stmt, qty_tol, price_tol
+        )
+        logger.info(
+            "[RECON DEBUG] Layer 3.5 (aggregate fallback): %d matches, "
+            "%d ERP unmatched, %d stmt unmatched",
+            len(l25_matches), len(unmatched_erp), len(unmatched_stmt),
+        )
+        for m in l25_matches:
             all_results.append(_match_to_result(m, run.id, supplier_id, period))
 
         # Layer 4: AI match (if enabled)
@@ -606,11 +618,11 @@ async def run_reconciliation(
             "  Total results: %d\n"
             "  Unmatched ERP (missing from statement): %d\n"
             "  Unmatched stmt (missing from ERP): %d\n"
-            "  Layer breakdown: L1=%d, L2=%d, L2.5=%d, L3=%d, L4=%d",
+            "  Layer breakdown: L1=%d, L2=%d, L3=%d, L3.5=%d, L4=%d",
             len(all_results),
             len(unmatched_erp), len(unmatched_stmt),
-            len(l1_matches), len(l2_matches), len(l25_matches),
-            len(l3_matches),
+            len(l1_matches), len(l2_matches), len(l3_matches),
+            len(l25_matches),
             len(l4_matches),
         )
         if unmatched_erp:
