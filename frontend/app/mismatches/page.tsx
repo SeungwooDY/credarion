@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import PageHeader from "../components/page-header";
 import StatusBadge from "../components/status-badge";
 import SpreadsheetGrid, { type GridColumn, type GridRow } from "../components/spreadsheet-grid";
-import { useOrgs, useMismatches } from "../lib/swr";
+import { useMismatches } from "../lib/swr";
+import { useOrgPeriod } from "../lib/period";
 import { RippleButton } from "@/components/ui/multi-type-ripple-buttons";
 import { CARD } from "@/app/lib/ui";
 import { useT, type TFunction } from "@/app/lib/i18n";
@@ -63,8 +64,7 @@ function formatNum(n: number | null | undefined, decimals = 2): string {
 
 function formatCurrency(n: number | null | undefined): string {
   if (n == null) return "-";
-  const sign = n < 0 ? "-" : "";
-  return `${sign}¥${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `¥${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function DiscrepancyLabel({ type }: { type: string | null }) {
@@ -503,11 +503,11 @@ function SupplierCard({
           </div>
 
           {/* Items table */}
-          <div className="overflow-auto max-h-[70vh]">
+          <div className="overflow-x-auto">
             <table className="w-full text-xs">
-              <thead className="sticky top-0 z-10">
+              <thead>
                 <tr className="border-t border-b border-border bg-zinc-50 text-zinc-500">
-                  <th className="text-center px-2 py-2 w-8 bg-zinc-50">
+                  <th className="text-center px-2 py-2 w-8">
                     <input
                       type="checkbox"
                       checked={selected.size > 0 && selected.size === unresolvedItems.length}
@@ -518,17 +518,17 @@ function SupplierCard({
                       className="rounded"
                     />
                   </th>
-                  <th className="text-left px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_issue")}</th>
-                  <th className="text-left px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_po")}</th>
-                  <th className="text-left px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_part_number")}</th>
-                  <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_erp_qty")}</th>
-                  <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_stmt_qty")}</th>
-                  <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_qty_delta")}</th>
-                  <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_erp_amt")}</th>
-                  <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_stmt_amt")}</th>
-                  <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_amt_delta")}</th>
-                  <th className="text-center px-3 py-2 font-medium bg-zinc-50">{t("common.status")}</th>
-                  <th className="text-center px-3 py-2 font-medium w-20 bg-zinc-50">{t("common.action")}</th>
+                  <th className="text-left px-3 py-2 font-medium">{t("mismatches.col_issue")}</th>
+                  <th className="text-left px-3 py-2 font-medium">{t("mismatches.col_po")}</th>
+                  <th className="text-left px-3 py-2 font-medium">{t("mismatches.col_part_number")}</th>
+                  <th className="text-right px-3 py-2 font-medium">{t("mismatches.col_erp_qty")}</th>
+                  <th className="text-right px-3 py-2 font-medium">{t("mismatches.col_stmt_qty")}</th>
+                  <th className="text-right px-3 py-2 font-medium">{t("mismatches.col_qty_delta")}</th>
+                  <th className="text-right px-3 py-2 font-medium">{t("mismatches.col_erp_amt")}</th>
+                  <th className="text-right px-3 py-2 font-medium">{t("mismatches.col_stmt_amt")}</th>
+                  <th className="text-right px-3 py-2 font-medium">{t("mismatches.col_amt_delta")}</th>
+                  <th className="text-center px-3 py-2 font-medium">{t("common.status")}</th>
+                  <th className="text-center px-3 py-2 font-medium w-20">{t("common.action")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -601,7 +601,7 @@ function SupplierCard({
                       <td className="px-3 py-2 text-center">
                         {isResolved ? (
                           <span
-                            className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 cursor-help capitalize"
+                            className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 cursor-help"
                             title={item.resolution_note || ""}
                           >
                             {t("mismatches.resolved")}
@@ -913,18 +913,11 @@ function SpreadsheetView({
 
 export default function MismatchesPage() {
   const t = useT();
-  const { orgs } = useOrgs();
-  const [orgId, setOrgId] = useState("");
-  const [period, setPeriod] = useState("2026-03");
+  const { orgId, period } = useOrgPeriod();
   const { data, mismatchesLoading: loading, mismatchesError, refreshMismatches } = useMismatches(orgId, period);
   const error = mismatchesError?.message ?? "";
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<ViewMode>("review");
-
-  useEffect(() => {
-    if (orgs.length > 0 && !orgId) setOrgId(orgs[0].id);
-  }, [orgs, orgId]);
-
 
   function toggleExpand(supplierId: string) {
     setExpanded((prev) => {
@@ -963,16 +956,6 @@ export default function MismatchesPage() {
 
       {/* Controls */}
       <div className="flex gap-4 items-end mb-6">
-        <div>
-          <label className="block text-xs font-medium mb-1">{t("common.period")}</label>
-          <input
-            type="text"
-            value={period}
-            onChange={(e) => setPeriod(e.target.value)}
-            className="border border-border rounded-lg px-3 py-2 text-sm bg-card w-28 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
-          />
-        </div>
-
         {/* View mode toggle */}
         {!loading && data.length > 0 && (
           <div className="ml-auto flex rounded-lg border border-border overflow-hidden">

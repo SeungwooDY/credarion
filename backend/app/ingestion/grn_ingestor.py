@@ -23,6 +23,7 @@ from app.ingestion.cleaning import (
     strip_part_number,
 )
 from app.models import ERPRecord, Organization, Supplier
+from app.periods import ensure_period, validate_period
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +176,7 @@ def ingest_grn(
     file_path: str,
     org_id: uuid.UUID,
     db: Session,
+    period: str | None = None,
     on_progress: object = None,
 ) -> GRNIngestionResult:
     """Full ingestion pipeline for SGWERP GRN CSV export.
@@ -183,6 +185,9 @@ def ingest_grn(
         file_path: Path to the GRN CSV file.
         org_id: UUID of the organization.
         db: SQLAlchemy session.
+        period: Accounting month ("YYYY-MM") to stamp every ingested row with.
+            Required by the API; when given, the period registry row is ensured.
+        on_progress: Optional progress callback.
 
     Returns:
         GRNIngestionResult with status, counts, and any errors.
@@ -227,6 +232,15 @@ def ingest_grn(
     if not org:
         result.errors.append(f"Organization {org_id} not found")
         return result
+
+    # Step 3b: Validate + ensure the accounting period exists for this org.
+    if period is not None:
+        try:
+            period = validate_period(period)
+            ensure_period(db, org_id, period)
+        except ValueError as e:
+            result.errors.append(str(e))
+            return result
 
     # Step 4: Upsert suppliers
     if on_progress:
@@ -329,6 +343,7 @@ def ingest_grn(
                 grn_date=grn_date.to_pydatetime() if hasattr(grn_date, "to_pydatetime") else grn_date,
                 delivery_order=delivery_order,
                 delivery_note=delivery_note,
+                period=period,
                 source_file=source_file,
                 raw_row=raw_row,
             )

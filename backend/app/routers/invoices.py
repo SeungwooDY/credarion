@@ -23,6 +23,7 @@ from app.invoicing.schemas import (
 )
 from app.invoicing.supplier_matcher import match_supplier
 from app.models import Invoice, InvoiceLineItem
+from app.periods import ensure_period
 
 router = APIRouter(prefix="/api/v1/invoices", tags=["invoices"])
 
@@ -101,10 +102,18 @@ def _invoice_to_detail(inv: Invoice) -> InvoiceDetail:
 async def upload_invoices(
     org_id: uuid.UUID,
     files: list[UploadFile],
+    period: str | None = Query(None),
     db: Session = Depends(get_db),
 ) -> InvoiceUploadResponse:
-    """Batch upload invoice files. Creates Invoice records with status=received."""
+    """Batch upload invoice files. Creates Invoice records with status=received,
+    stamped with the active accounting period ("YYYY-MM") when provided."""
     created: list[InvoiceListItem] = []
+
+    if period is not None:
+        try:
+            ensure_period(db, org_id, period)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     for upload_file in files:
         ext = _ext_from_filename(upload_file.filename)
@@ -119,6 +128,7 @@ async def upload_invoices(
 
         invoice = Invoice(
             org_id=org_id,
+            period=period,
             status="received",
             file_url=relative_path,
             file_type=ext,

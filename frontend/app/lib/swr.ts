@@ -46,6 +46,32 @@ export function useOrgs() {
   };
 }
 
+// ── Accounting periods (monthly containers) ──────────────────
+
+export interface AccountingPeriod {
+  id: string;
+  org_id: string;
+  period: string; // "2026-07"
+  label: string; // "July 2026"
+  status: string; // open | closed
+}
+
+/** GET /periods?org_id — an org's months, newest first. */
+export function usePeriods(orgId: string) {
+  const key = orgId ? `/periods?org_id=${orgId}` : null;
+  const { data, error, isLoading, mutate } = useSWR<AccountingPeriod[]>(
+    key,
+    fetcher,
+    swrDefaults
+  );
+  return {
+    periods: data ?? [],
+    periodsLoading: isLoading,
+    periodsError: error,
+    refreshPeriods: () => mutate(),
+  };
+}
+
 // ── Invoice Processing — disabled until Phase 2 ──────────────
 // The invoice endpoints are not ready, so the hook below is intentionally
 // removed to avoid broken API calls / error states on the dashboard. The

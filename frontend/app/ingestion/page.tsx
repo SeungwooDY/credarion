@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import PageHeader from "../components/page-header";
-import { useOrgs } from "../lib/swr";
+import { useOrgPeriod } from "../lib/period";
 import { CARD } from "@/app/lib/ui";
 import { FileDropzone } from "@/components/ui/file-dropzone";
 import { useT } from "@/app/lib/i18n";
@@ -48,8 +48,7 @@ const FIELD_LABEL_KEYS: Record<string, string> = {
 
 export default function IngestionPage() {
   const t = useT();
-  const { orgs } = useOrgs();
-  const [orgId, setOrgId] = useState("");
+  const { orgId, period } = useOrgPeriod();
 
   const [grnFile, setGrnFile] = useState<File | null>(null);
   const [grnStatus, setGrnStatus] = useState("");
@@ -65,17 +64,14 @@ export default function IngestionPage() {
   const [selectedPeriod, setSelectedPeriod] = useState("");
   const [duplicateInfo, setDuplicateInfo] = useState<DuplicateInfo | null>(null);
 
-  useEffect(() => {
-    if (orgs.length > 0 && !orgId) setOrgId(orgs[0].id);
-  }, [orgs, orgId]);
-
   async function uploadGRN() {
-    if (!grnFile || !orgId) return;
+    if (!grnFile || !orgId || !period) return;
     setGrnLoading(true);
     setGrnStatus("");
     const fd = new FormData();
     fd.append("file", grnFile);
     fd.append("org_id", orgId);
+    fd.append("period", period);
 
     try {
       const res = await fetch("/api/v1/erp/upload-stream", {
@@ -151,7 +147,7 @@ export default function IngestionPage() {
       }
       const data: PreviewData = await res.json();
       setPreview(data);
-      setSelectedPeriod(data.detected_period || "");
+      setSelectedPeriod(period || data.detected_period || "");
       setStmtStep("preview");
     } catch (e) {
       setStmtError(`Error: ${e instanceof Error ? e.message : String(e)}`);
@@ -233,6 +229,18 @@ export default function IngestionPage() {
         description={t("ingestion.description")}
       />
 
+      {/* Active month — driven by the month switcher at the top of the page. */}
+      <div className="mb-6 text-sm text-zinc-600">
+        {period ? (
+          <>
+            {t("ingestion.ingesting_into")}{" "}
+            <span className="font-semibold text-accent">{period}</span>
+          </>
+        ) : (
+          <span className="text-amber-600">{t("ingestion.select_month_first")}</span>
+        )}
+      </div>
+
       <div className="grid grid-cols-2 gap-6">
         {/* GRN Upload */}
         <div className={`${CARD} p-5`}>
@@ -254,7 +262,7 @@ export default function IngestionPage() {
 
           <button
             onClick={uploadGRN}
-            disabled={!grnFile || !orgId || grnLoading}
+            disabled={!grnFile || !orgId || !period || grnLoading}
             className="px-4 py-2 bg-accent hover:bg-accent-dark text-white rounded-lg text-sm disabled:opacity-40 transition-colors"
           >
             {grnLoading ? t("ingestion.uploading") : t("ingestion.upload_grn")}
