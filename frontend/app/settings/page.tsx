@@ -16,10 +16,8 @@ interface ReconConfigForm {
 
 export default function SettingsPage() {
   const t = useT();
-  const { orgs, refreshOrgs } = useOrgs();
+  const { orgs } = useOrgs();
   const [orgId, setOrgId] = useState("");
-  const [newOrgName, setNewOrgName] = useState("");
-  const [orgMsg, setOrgMsg] = useState("");
   const { config, refreshConfig } = useReconConfig(orgId);
   const [formConfig, setFormConfig] = useState<ReconConfigForm | null>(null);
   const [configMsg, setConfigMsg] = useState("");
@@ -42,36 +40,6 @@ export default function SettingsPage() {
       setFormConfig(null);
     }
   }, [config]);
-
-  async function createOrg() {
-    if (!newOrgName.trim()) return;
-    try {
-      const res = await fetch("/api/v1/orgs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newOrgName.trim() }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setOrgMsg(t("settings.created_msg", { name: data.name }));
-        setNewOrgName("");
-        await refreshOrgs();
-        setOrgId(data.id);
-      } else {
-        setOrgMsg(
-          t("settings.error_msg", {
-            detail: data.detail || JSON.stringify(data),
-          })
-        );
-      }
-    } catch (e) {
-      setOrgMsg(
-        t("settings.error_msg", {
-          detail: e instanceof Error ? e.message : String(e),
-        })
-      );
-    }
-  }
 
   async function saveConfig() {
     if (!formConfig || !orgId) return;
@@ -126,33 +94,6 @@ export default function SettingsPage() {
               </div>
             ))}
           </div>
-
-          <hr className="border-border mb-4" />
-
-          <label className="block text-xs font-medium mb-1">
-            {t("settings.create_new_org")}
-          </label>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={newOrgName}
-              onChange={(e) => setNewOrgName(e.target.value)}
-              placeholder={t("settings.org_name_placeholder")}
-              className="flex-1 border border-border rounded px-3 py-2 text-sm bg-white"
-            />
-            <button
-              onClick={createOrg}
-              disabled={!newOrgName.trim()}
-              className="px-4 py-2 bg-accent text-white rounded text-sm disabled:opacity-40"
-            >
-              {t("settings.create")}
-            </button>
-          </div>
-          {orgMsg && (
-            <div className="mt-2 text-xs p-2 bg-muted rounded">
-              {orgMsg}
-            </div>
-          )}
         </div>
 
         {/* Reconciliation Config */}

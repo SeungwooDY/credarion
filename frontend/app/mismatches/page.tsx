@@ -63,7 +63,8 @@ function formatNum(n: number | null | undefined, decimals = 2): string {
 
 function formatCurrency(n: number | null | undefined): string {
   if (n == null) return "-";
-  return `¥${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const sign = n < 0 ? "-" : "";
+  return `${sign}¥${Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 function DiscrepancyLabel({ type }: { type: string | null }) {
@@ -502,11 +503,11 @@ function SupplierCard({
           </div>
 
           {/* Items table */}
-          <div className="overflow-x-auto">
+          <div className="overflow-auto max-h-[70vh]">
             <table className="w-full text-xs">
-              <thead>
+              <thead className="sticky top-0 z-10">
                 <tr className="border-t border-b border-border bg-zinc-50 text-zinc-500">
-                  <th className="text-center px-2 py-2 w-8">
+                  <th className="text-center px-2 py-2 w-8 bg-zinc-50">
                     <input
                       type="checkbox"
                       checked={selected.size > 0 && selected.size === unresolvedItems.length}
@@ -517,17 +518,17 @@ function SupplierCard({
                       className="rounded"
                     />
                   </th>
-                  <th className="text-left px-3 py-2 font-medium">{t("mismatches.col_issue")}</th>
-                  <th className="text-left px-3 py-2 font-medium">{t("mismatches.col_po")}</th>
-                  <th className="text-left px-3 py-2 font-medium">{t("mismatches.col_part_number")}</th>
-                  <th className="text-right px-3 py-2 font-medium">{t("mismatches.col_erp_qty")}</th>
-                  <th className="text-right px-3 py-2 font-medium">{t("mismatches.col_stmt_qty")}</th>
-                  <th className="text-right px-3 py-2 font-medium">{t("mismatches.col_qty_delta")}</th>
-                  <th className="text-right px-3 py-2 font-medium">{t("mismatches.col_erp_amt")}</th>
-                  <th className="text-right px-3 py-2 font-medium">{t("mismatches.col_stmt_amt")}</th>
-                  <th className="text-right px-3 py-2 font-medium">{t("mismatches.col_amt_delta")}</th>
-                  <th className="text-center px-3 py-2 font-medium">{t("common.status")}</th>
-                  <th className="text-center px-3 py-2 font-medium w-20">{t("common.action")}</th>
+                  <th className="text-left px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_issue")}</th>
+                  <th className="text-left px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_po")}</th>
+                  <th className="text-left px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_part_number")}</th>
+                  <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_erp_qty")}</th>
+                  <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_stmt_qty")}</th>
+                  <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_qty_delta")}</th>
+                  <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_erp_amt")}</th>
+                  <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_stmt_amt")}</th>
+                  <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_amt_delta")}</th>
+                  <th className="text-center px-3 py-2 font-medium bg-zinc-50">{t("common.status")}</th>
+                  <th className="text-center px-3 py-2 font-medium w-20 bg-zinc-50">{t("common.action")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -600,7 +601,7 @@ function SupplierCard({
                       <td className="px-3 py-2 text-center">
                         {isResolved ? (
                           <span
-                            className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 cursor-help"
+                            className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-green-50 text-green-700 cursor-help capitalize"
                             title={item.resolution_note || ""}
                           >
                             {t("mismatches.resolved")}
@@ -962,18 +963,6 @@ export default function MismatchesPage() {
 
       {/* Controls */}
       <div className="flex gap-4 items-end mb-6">
-        <div>
-          <label className="block text-xs font-medium mb-1">{t("mismatches.organization")}</label>
-          <select
-            value={orgId}
-            onChange={(e) => setOrgId(e.target.value)}
-            className="border border-border rounded-lg px-3 py-2 text-sm bg-card focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
-          >
-            {orgs.map((o) => (
-              <option key={o.id} value={o.id}>{o.name}</option>
-            ))}
-          </select>
-        </div>
         <div>
           <label className="block text-xs font-medium mb-1">{t("common.period")}</label>
           <input

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.db import get_db
 from app.models import (
     ERPRecord,
+    Organization,
     ReconciliationConfig,
     ReconciliationResult,
     ReconciliationRun,
@@ -654,6 +655,229 @@ async def list_mismatches(
     # Sort by total mismatches descending
     result_list.sort(key=lambda x: x["total_mismatches"], reverse=True)
     return result_list
+
+
+@router.get("/dashboard")
+async def dashboard_overview(
+    org_id: uuid.UUID | None = Query(None),
+    period: str | None = Query(None),
+    db: Session = Depends(get_db),
+) -> list[dict]:
+    """Per-supplier overview for the home dashboard.
+
+    When ``org_id`` / ``period`` are omitted this auto-selects the first
+    organization and the most recent period that has reconciliation data, so the
+    dashboard "just works" for a single-org pilot. Each row carries monetary
+    ERP/statement totals, the unresolved discrepancy value, a coarse status, and
+    the action the user should take.
+    """
+    from collections import defaultdict
+
+    from app.reconciliation.orchestrator import _period_date_range
+
+    # --- Auto-select org + period when not provided ---
+    if org_id is None:
+        first_org = db.query(Organization).first()
+        if first_org is None:
+            return []
+        org_id = first_org.id
+
+    if period is None:
+        latest_run_period = (
+            db.query(ReconciliationRun.period)
+            .join(Supplier, ReconciliationRun.supplier_id == Supplier.id)
+            .filter(Supplier.org_id == org_id, ReconciliationRun.status == "completed")
+            .order_by(desc(ReconciliationRun.period))
+            .first()
+        )
+        if latest_run_period:
+            period = latest_run_period[0]
+        else:
+            latest_stmt_period = (
+                db.query(SupplierStatement.period)
+                .join(Supplier, SupplierStatement.supplier_id == Supplier.id)
+                .filter(Supplier.org_id == org_id)
+                .order_by(desc(SupplierStatement.period))
+                .first()
+            )
+            if latest_stmt_period is None:
+                return []
+            period = latest_stmt_period[0]
+
+    period_start, period_end = _period_date_range(period)
+
+    # --- Monetary totals per supplier (ERP by grn_date window, statement by period) ---
+    erp_agg: dict[uuid.UUID, tuple[float, int]] = {}
+    for sid, amt, cnt in (
+        db.query(
+            ERPRecord.supplier_id,
+            func.sum(ERPRecord.amount),
+            func.count(ERPRecord.id),
+        )
+        .join(Supplier, ERPRecord.supplier_id == Supplier.id)
+        .filter(
+            Supplier.org_id == org_id,
+            ERPRecord.grn_date >= period_start,
+            ERPRecord.grn_date <= period_end,
+        )
+        .group_by(ERPRecord.supplier_id)
+        .all()
+    ):
+        erp_agg[sid] = (float(amt or 0), cnt)
+
+    stmt_agg: dict[uuid.UUID, tuple[float, int]] = {}
+    for sid, amt, cnt in (
+        db.query(
+            SupplierStatement.supplier_id,
+            func.sum(StatementLineItem.amount),
+            func.count(StatementLineItem.id),
+        )
+        .join(StatementLineItem, StatementLineItem.statement_id == SupplierStatement.id)
+        .join(Supplier, SupplierStatement.supplier_id == Supplier.id)
+        .filter(
+            Supplier.org_id == org_id,
+            SupplierStatement.period == period,
+        )
+        .group_by(SupplierStatement.supplier_id)
+        .all()
+    ):
+        stmt_agg[sid] = (float(amt or 0), cnt)
+
+    supplier_ids = set(erp_agg) | set(stmt_agg)
+    if not supplier_ids:
+        return []
+
+    # --- Latest completed run + its discrepancy results per supplier ---
+    latest_runs: dict[uuid.UUID, ReconciliationRun] = {}
+    for run in (
+        db.query(ReconciliationRun)
+        .join(Supplier, ReconciliationRun.supplier_id == Supplier.id)
+        .filter(
+            Supplier.org_id == org_id,
+            ReconciliationRun.period == period,
+            ReconciliationRun.status == "completed",
+        )
+        .order_by(ReconciliationRun.supplier_id, desc(ReconciliationRun.started_at))
+        .all()
+    ):
+        if run.supplier_id not in latest_runs:
+            latest_runs[run.supplier_id] = run
+
+    run_ids = [r.id for r in latest_runs.values()]
+    disc_by_supplier: dict[uuid.UUID, list[ReconciliationResult]] = defaultdict(list)
+    erp_amt_map: dict[uuid.UUID, float] = {}
+    stmt_amt_map: dict[uuid.UUID, float] = {}
+    if run_ids:
+        disc_results = (
+            db.query(ReconciliationResult)
+            .filter(
+                ReconciliationResult.run_id.in_(run_ids),
+                ReconciliationResult.discrepancy_type.isnot(None),
+            )
+            .all()
+        )
+        for r in disc_results:
+            disc_by_supplier[r.supplier_id].append(r)
+
+        erp_ids = [r.erp_record_id for r in disc_results if r.erp_record_id]
+        stmt_ids = [r.statement_line_id for r in disc_results if r.statement_line_id]
+        if erp_ids:
+            for rid, amt in db.query(ERPRecord.id, ERPRecord.amount).filter(ERPRecord.id.in_(erp_ids)).all():
+                erp_amt_map[rid] = float(amt or 0)
+        if stmt_ids:
+            for rid, amt in db.query(StatementLineItem.id, StatementLineItem.amount).filter(StatementLineItem.id.in_(stmt_ids)).all():
+                stmt_amt_map[rid] = float(amt or 0)
+
+    def _issue_value(r: ReconciliationResult) -> float:
+        """Money at risk for one unresolved discrepancy.
+
+        Uses the amount delta when present (qty/price/amount mismatches); for an
+        item missing from one side, falls back to that side's line amount.
+        """
+        if r.amount_delta is not None and float(r.amount_delta) != 0:
+            return abs(float(r.amount_delta))
+        if r.erp_record_id and r.erp_record_id in erp_amt_map:
+            return erp_amt_map[r.erp_record_id]
+        if r.statement_line_id and r.statement_line_id in stmt_amt_map:
+            return stmt_amt_map[r.statement_line_id]
+        md = r.match_details or {}
+        try:
+            return abs(float(md.get("amount") or 0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    suppliers = {
+        s.id: s
+        for s in db.query(Supplier)
+        .filter(Supplier.org_id == org_id, Supplier.id.in_(supplier_ids))
+        .all()
+    }
+
+    status_rank = {"error": 0, "discrepancy": 1, "pending": 2, "in_review": 3, "matched": 4}
+    rows: list[dict] = []
+    for sid in supplier_ids:
+        s = suppliers.get(sid)
+        if s is None:
+            continue
+        erp_sum, erp_count = erp_agg.get(sid, (0.0, 0))
+        stmt_sum, stmt_count = stmt_agg.get(sid, (0.0, 0))
+        has_erp = erp_count > 0
+        has_stmt = stmt_count > 0
+        run = latest_runs.get(sid)
+
+        items = disc_by_supplier.get(sid, [])
+        unresolved = [i for i in items if i.status != "resolved"]
+        # missing_from_erp = on statement, absent from ERP ("not in ERP")
+        not_in_erp = sum(1 for i in unresolved if i.discrepancy_type == "missing_from_erp")
+        not_in_stmt = sum(1 for i in unresolved if i.discrepancy_type == "missing_from_statement")
+        qty_issues = sum(1 for i in unresolved if i.discrepancy_type and "quantity" in i.discrepancy_type)
+        price_issues = sum(1 for i in unresolved if i.discrepancy_type and "price" in i.discrepancy_type)
+        disc_value = sum(_issue_value(i) for i in unresolved)
+
+        if not (has_erp and has_stmt):
+            status, action = "pending", "upload"
+        elif run is None:
+            status, action = "pending", "review"
+        elif run.status == "failed":
+            status, action = "error", "review"
+        elif unresolved:
+            status, action = "discrepancy", "review"
+        else:
+            status, action = "matched", "none"
+
+        detail_parts: list[str] = []
+        if not has_erp:
+            detail_parts.append("No ERP records")
+        elif not has_stmt:
+            detail_parts.append("No supplier statement")
+        else:
+            if not_in_erp:
+                detail_parts.append(f"{not_in_erp} not in ERP")
+            if not_in_stmt:
+                detail_parts.append(f"{not_in_stmt} not in statement")
+            if qty_issues:
+                noun = "discrepancy" if qty_issues == 1 else "discrepancies"
+                detail_parts.append(f"{qty_issues} qty {noun}")
+            if price_issues:
+                noun = "discrepancy" if price_issues == 1 else "discrepancies"
+                detail_parts.append(f"{price_issues} price {noun}")
+        details = " · ".join(detail_parts) if detail_parts else None
+
+        rows.append({
+            "vendor_code": s.vendor_code,
+            "name": s.name,
+            "display_name": s.name,
+            "pinyin": s.vendor_code,
+            "status": status,
+            "erp_total": round(erp_sum, 2) if has_erp else None,
+            "statement_total": round(stmt_sum, 2) if has_stmt else None,
+            "discrepancy_value": round(disc_value, 2),
+            "discrepancy_details": details,
+            "action_required": action,
+        })
+
+    rows.sort(key=lambda x: (status_rank.get(x["status"], 9), -(x["discrepancy_value"] or 0), x["name"]))
+    return rows
 
 
 @router.get("/config/{org_id}", response_model=ConfigResponse)
