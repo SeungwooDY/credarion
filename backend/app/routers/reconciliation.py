@@ -521,12 +521,18 @@ async def list_mismatches(
     org_id: uuid.UUID = Query(...),
     period: str = Query(...),
     supplier_id: uuid.UUID | None = None,
+    include_matches: bool = Query(False),
     db: Session = Depends(get_db),
 ) -> list[dict]:
     """Return mismatched/discrepancy results grouped by supplier with enriched ERP+statement data.
 
     Each supplier entry includes summary counts and individual mismatch items
     with PO number, material number, quantities, prices, and amounts from both sides.
+
+    When ``include_matches`` is true, clean matched line items (no discrepancy)
+    are returned alongside the mismatches so the UI can show/export everything.
+    Summary counts (``total_mismatches`` etc.) always reflect mismatches only;
+    matched rows are counted separately in ``total_matches``.
     """
     from app.reconciliation.orchestrator import _period_date_range
 
@@ -555,16 +561,15 @@ async def list_mismatches(
     if not latest_runs:
         return []
 
-    # Fetch all discrepancy/unmatched results for these runs
+    # Fetch results for these runs. By default only discrepancies; when
+    # include_matches is set, also pull clean matched rows (discrepancy_type NULL).
     run_ids = [r.id for r in latest_runs.values()]
-    results = (
-        db.query(ReconciliationResult)
-        .filter(
-            ReconciliationResult.run_id.in_(run_ids),
-            ReconciliationResult.discrepancy_type.isnot(None),
-        )
-        .all()
+    results_q = db.query(ReconciliationResult).filter(
+        ReconciliationResult.run_id.in_(run_ids),
     )
+    if not include_matches:
+        results_q = results_q.filter(ReconciliationResult.discrepancy_type.isnot(None))
+    results = results_q.all()
 
     if not results:
         return []
@@ -638,6 +643,8 @@ async def list_mismatches(
         unmatched_stmt = sum(1 for i in items if i["discrepancy_type"] == "missing_from_erp")
         qty_issues = sum(1 for i in items if i["discrepancy_type"] and "quantity" in i["discrepancy_type"])
         price_issues = sum(1 for i in items if i["discrepancy_type"] and "price" in i["discrepancy_type"])
+        mismatch_count = sum(1 for i in items if i["discrepancy_type"])
+        match_count = sum(1 for i in items if not i["discrepancy_type"])
 
         result_list.append({
             "supplier_id": str(sid),
@@ -647,7 +654,8 @@ async def list_mismatches(
             "match_rate": float(run.auto_match_rate) if run.auto_match_rate is not None else None,
             "total_erp": run.total_erp,
             "total_statement": run.total_statement,
-            "total_mismatches": len(items),
+            "total_mismatches": mismatch_count,
+            "total_matches": match_count,
             "unmatched_erp": unmatched_erp,
             "unmatched_stmt": unmatched_stmt,
             "qty_issues": qty_issues,

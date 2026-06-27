@@ -256,6 +256,7 @@ interface SupplierMismatch {
   total_erp: number;
   total_statement: number;
   total_mismatches: number;
+  total_matches?: number;
   unmatched_erp: number;
   unmatched_stmt: number;
   qty_issues: number;
@@ -263,9 +264,9 @@ interface SupplierMismatch {
   items: MismatchItem[];
 }
 
-export function useMismatches(orgId: string, period: string) {
+export function useMismatches(orgId: string, period: string, includeMatches = false) {
   const key = orgId && period
-    ? `/reconciliation/mismatches?org_id=${orgId}&period=${period}`
+    ? `/reconciliation/mismatches?org_id=${orgId}&period=${period}${includeMatches ? "&include_matches=true" : ""}`
     : null;
   const { data, error, isLoading, mutate } = useSWR<SupplierMismatch[]>(
     key,

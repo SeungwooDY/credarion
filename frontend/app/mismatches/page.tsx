@@ -43,6 +43,7 @@ interface SupplierMismatch {
   total_erp: number;
   total_statement: number;
   total_mismatches: number;
+  total_matches?: number;
   unmatched_erp: number;
   unmatched_stmt: number;
   qty_issues: number;
@@ -50,7 +51,11 @@ interface SupplierMismatch {
   items: MismatchItem[];
 }
 
-type FilterType = "all" | "missing_from_erp" | "missing_from_statement" | "quantity" | "price" | "resolved";
+type FilterType = "all" | "missing_from_erp" | "missing_from_statement" | "quantity" | "price" | "resolved" | "matched";
+
+// Matched rows can be very high volume (1,000+/mo). Cap how many render in the
+// review table; the full set is still included in the spreadsheet export.
+const MATCH_VIEW_CAP = 100;
 type ViewMode = "review" | "spreadsheet";
 
 function formatNum(n: number | null | undefined, decimals = 2): string {
@@ -339,6 +344,7 @@ function SupplierCard({
   const filteredItems = s.items.filter((item) => {
     if (filter === "all") return true;
     if (filter === "resolved") return item.status === "resolved";
+    if (filter === "matched") return !item.discrepancy_type;
     if (filter === "missing_from_erp") return item.discrepancy_type === "missing_from_erp";
     if (filter === "missing_from_statement") return item.discrepancy_type === "missing_from_statement";
     if (filter === "quantity") return item.discrepancy_type?.includes("quantity");
@@ -346,7 +352,16 @@ function SupplierCard({
     return true;
   });
 
-  const unresolvedItems = filteredItems.filter((i) => i.status !== "resolved");
+  // Cap matched rows in the view (mismatches always shown in full); export keeps everything.
+  const matchedCount = s.items.filter((i) => !i.discrepancy_type).length;
+  const matchedInView = filteredItems.filter((i) => !i.discrepancy_type);
+  const mismatchInView = filteredItems.filter((i) => i.discrepancy_type);
+  const cappedMatched = matchedInView.slice(0, MATCH_VIEW_CAP);
+  const hiddenMatchCount = matchedInView.length - cappedMatched.length;
+  const displayItems = [...mismatchInView, ...cappedMatched];
+
+  // Only true mismatches are resolvable; matched rows have no actions.
+  const unresolvedItems = filteredItems.filter((i) => i.status !== "resolved" && i.discrepancy_type);
   const resolvedCount = s.items.filter((i) => i.status === "resolved").length;
 
   function toggleSelect(id: string) {
@@ -445,6 +460,7 @@ function SupplierCard({
                 ["quantity", `${t("mismatches.filter_qty")} (${s.qty_issues})`],
                 ["price", `${t("mismatches.filter_price")} (${s.price_issues})`],
                 ["resolved", `${t("mismatches.filter_resolved")} (${resolvedCount})`],
+                ["matched", `${t("mismatches.filter_matched")} (${matchedCount})`],
               ] as [FilterType, string][])
                 .filter(([key]) => {
                   if (key === "all") return true;
@@ -453,6 +469,7 @@ function SupplierCard({
                   if (key === "quantity") return s.qty_issues > 0;
                   if (key === "price") return s.price_issues > 0;
                   if (key === "resolved") return resolvedCount > 0;
+                  if (key === "matched") return matchedCount > 0;
                   return true;
                 })
                 .map(([key, label]) => (
@@ -531,16 +548,19 @@ function SupplierCard({
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.map((item) => {
+                {displayItems.map((item) => {
                   const po = item.erp?.po_number || item.statement?.po_number || "-";
                   const pn = item.erp?.material_number || item.statement?.material_number || "-";
+                  const isMatch = !item.discrepancy_type;
                   const isUnmatched = item.match_type === "unmatched";
                   const isResolved = item.status === "resolved";
-                  const rowBg = isResolved
-                    ? "bg-green-50/30"
-                    : isUnmatched
-                      ? "bg-red-50/30"
-                      : "";
+                  const rowBg = isMatch
+                    ? "bg-green-50/40"
+                    : isResolved
+                      ? "bg-green-50/30"
+                      : isUnmatched
+                        ? "bg-red-50/30"
+                        : "";
 
                   return (
                     <tr
@@ -548,7 +568,7 @@ function SupplierCard({
                       className={`border-t border-border hover:bg-zinc-50 ${rowBg}`}
                     >
                       <td className="text-center px-2 py-2">
-                        {!isResolved && (
+                        {!isResolved && !isMatch && (
                           <input
                             type="checkbox"
                             checked={selected.has(item.id)}
@@ -558,7 +578,14 @@ function SupplierCard({
                         )}
                       </td>
                       <td className="px-3 py-2">
-                        <DiscrepancyLabel type={item.discrepancy_type} />
+                        {isMatch ? (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium text-green-700 bg-green-50 border border-green-200">
+                            <span aria-hidden>✓</span>
+                            {t("mismatches.matched")}
+                          </span>
+                        ) : (
+                          <DiscrepancyLabel type={item.discrepancy_type} />
+                        )}
                       </td>
                       <td className="px-3 py-2 font-mono whitespace-nowrap">{po}</td>
                       <td
@@ -610,7 +637,7 @@ function SupplierCard({
                         )}
                       </td>
                       <td className="px-3 py-2 text-center">
-                        {!isResolved && (
+                        {!isResolved && !isMatch && (
                           <button
                             onClick={() => setResolveItems([item])}
                             className="px-2 py-0.5 text-xs text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
@@ -626,7 +653,13 @@ function SupplierCard({
             </table>
           </div>
 
-          {filteredItems.length === 0 && (
+          {hiddenMatchCount > 0 && (
+            <div className="px-4 py-2 text-center text-xs text-zinc-400 border-t border-border bg-green-50/30">
+              {t("mismatches.matches_capped", { shown: cappedMatched.length, total: matchedInView.length })}
+            </div>
+          )}
+
+          {displayItems.length === 0 && (
             <div className="px-4 py-6 text-center text-xs text-zinc-400">
               {t("mismatches.no_items_match_filter")}
             </div>
@@ -914,7 +947,8 @@ export default function MismatchesPage() {
   const t = useT();
   const { orgId } = useCurrentOrg();
   const [period, setPeriod] = useState("2026-03");
-  const { data, mismatchesLoading: loading, mismatchesError, refreshMismatches } = useMismatches(orgId, period);
+  const [showMatches, setShowMatches] = useState(false);
+  const { data, mismatchesLoading: loading, mismatchesError, refreshMismatches } = useMismatches(orgId, period, showMatches);
   const error = mismatchesError?.message ?? "";
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<ViewMode>("review");
@@ -967,9 +1001,27 @@ export default function MismatchesPage() {
           />
         </div>
 
+        {/* Show matches toggle — controls both the table view and what gets exported */}
+        {!loading && (
+          <button
+            onClick={() => setShowMatches((v) => !v)}
+            title={t("mismatches.show_matches_hint")}
+            className={`ml-auto px-3 py-2 text-xs font-medium rounded-lg border transition-colors flex items-center gap-1.5 ${
+              showMatches
+                ? "bg-green-600 text-white border-green-600 hover:bg-green-700"
+                : "bg-card text-zinc-600 border-border hover:bg-muted"
+            }`}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="20 6 9 17 4 12" />
+            </svg>
+            {showMatches ? t("mismatches.matches_shown") : t("mismatches.show_matches")}
+          </button>
+        )}
+
         {/* View mode toggle */}
         {!loading && data.length > 0 && (
-          <div className="ml-auto flex rounded-lg border border-border overflow-hidden">
+          <div className="flex rounded-lg border border-border overflow-hidden">
             <button
               onClick={() => setViewMode("review")}
               className={`px-3 py-2 text-xs font-medium transition-colors flex items-center gap-1.5 ${
