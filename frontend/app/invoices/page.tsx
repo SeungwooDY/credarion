@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { FileText } from "lucide-react";
 import PageHeader from "../components/page-header";
 import { Card } from "@/components/ui/card";
@@ -14,6 +16,14 @@ import { useT } from "@/app/lib/i18n";
  */
 export default function InvoicesPage() {
   const t = useT();
+  const router = useRouter();
+
+  // Invoices hidden for now — redirect to the dashboard. Remove this block to
+  // re-enable the route when Phase 2 ships.
+  useEffect(() => {
+    router.replace("/");
+  }, [router]);
+  return null;
 
   return (
     <>

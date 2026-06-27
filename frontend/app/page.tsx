@@ -185,20 +185,21 @@ export default function DashboardPage() {
         : t("dashboard.stage_complete", { n: matched, total }),
       status: "in-progress",
     },
+    // Invoice Matching stage hidden for now — restore (and renumber) for Phase 2.
+    // {
+    //   quarter: t("dashboard.step", { n: 2 }),
+    //   title: t("dashboard.stage.invoice_matching"),
+    //   description: t("dashboard.not_started"),
+    //   status: "upcoming",
+    // },
     {
       quarter: t("dashboard.step", { n: 2 }),
-      title: t("dashboard.stage.invoice_matching"),
-      description: t("dashboard.not_started"),
-      status: "upcoming",
-    },
-    {
-      quarter: t("dashboard.step", { n: 3 }),
       title: t("dashboard.stage.discrepancy_resolution"),
       description: t("dashboard.not_started"),
       status: "upcoming",
     },
     {
-      quarter: t("dashboard.step", { n: 4 }),
+      quarter: t("dashboard.step", { n: 3 }),
       title: t("dashboard.stage.cfo_signoff"),
       description: t("dashboard.not_started"),
       status: "upcoming",
@@ -222,7 +223,7 @@ export default function DashboardPage() {
       />
 
       {/* ── Section 1: Stat cards ── */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
         {/* Card 1 — Suppliers Reconciled */}
         <StatCard
           label={t("dashboard.card.suppliers_reconciled")}
@@ -280,7 +281,7 @@ export default function DashboardPage() {
           )}
         </StatCard>
 
-        {/* Card 3 — Invoice Processing (static placeholder, Phase 2) */}
+        {/* Card 3 — Invoice Processing hidden for now (restore for Phase 2)
         <StatCard
           label={t("dashboard.card.invoices")}
           subtext={t("dashboard.invoices_phase2_sub")}
@@ -292,6 +293,7 @@ export default function DashboardPage() {
             </span>
           </div>
         </StatCard>
+        */}
 
         {/* Card 4 — Days to Month-End Close */}
         <StatCard

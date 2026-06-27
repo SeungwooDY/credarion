@@ -104,7 +104,8 @@ const NAV_ITEMS: NavItem[] = [
   { labelKey: "nav.ingestion", url: "/ingestion", icon: Upload },
   { labelKey: "nav.reconciliation", url: "/reconciliation", icon: CircleCheck },
   { labelKey: "nav.mismatches", url: "/mismatches", icon: TriangleAlert },
-  { labelKey: "nav.invoices", url: "/invoices", icon: FileText, comingSoon: true },
+  // Invoices hidden for now — kept here to restore when Phase 2 ships.
+  // { labelKey: "nav.invoices", url: "/invoices", icon: FileText, comingSoon: true },
   { labelKey: "nav.settings", url: "/settings", icon: Settings },
 ];
 
