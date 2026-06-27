@@ -8,6 +8,7 @@ import { CARD } from "@/app/lib/ui";
 import { useT, type TFunction } from "@/app/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { MonthPicker } from "@/components/ui/month-picker";
 
 // Identifier recorded against confirm/flag actions.
 const REVIEWER_ID = "accountant";
@@ -504,12 +505,7 @@ export default function ReconciliationPage() {
       <div className="flex gap-4 items-end mb-6">
         <div>
           <label className="block text-xs font-medium text-zinc-500 mb-1.5">{t("common.period")}</label>
-          <input
-            type="text"
-            value={period}
-            onChange={(e) => setPeriod(e.target.value)}
-            className="border border-border rounded-lg px-3 py-2 text-sm bg-card w-28 focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
-          />
+          <MonthPicker value={period} onChange={setPeriod} label={t("common.period")} />
         </div>
       </div>
 
