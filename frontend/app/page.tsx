@@ -65,11 +65,11 @@ const LABEL = "text-xs uppercase tracking-wide text-gray-400";
 function InlineError({ message, onRetry }: { message: string; onRetry: () => void }) {
   const t = useT();
   return (
-    <div className="text-sm text-red-600">
+    <div className="text-sm text-gray-700">
       {message}{" "}
       <button
         onClick={onRetry}
-        className="font-medium underline underline-offset-2 hover:text-red-700"
+        className="font-medium text-gray-500 underline underline-offset-2 hover:text-gray-800"
       >
         {t("common.retry")}
       </button>
@@ -229,7 +229,7 @@ export default function DashboardPage() {
           label={t("dashboard.card.suppliers_reconciled")}
           subtext={
             suppliersError ? (
-              <span className="text-red-600">{t("dashboard.could_not_load")}</span>
+              <span className="text-gray-500">{t("dashboard.could_not_load")}</span>
             ) : suppliersLoading ? (
               <Skeleton className="h-3 w-24" />
             ) : (
@@ -262,7 +262,7 @@ export default function DashboardPage() {
           label={t("dashboard.card.discrepancy_value")}
           subtext={
             suppliersLoading || suppliersError ? (
-              suppliersLoading ? <Skeleton className="h-3 w-24" /> : <span className="text-red-600">{t("dashboard.could_not_load")}</span>
+              suppliersLoading ? <Skeleton className="h-3 w-24" /> : <span className="text-gray-500">{t("dashboard.could_not_load")}</span>
             ) : (
               t("dashboard.across_suppliers", { n: discrepancySuppliers.length })
             )
