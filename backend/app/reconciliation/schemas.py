@@ -18,13 +18,15 @@ class ReconciliationRunRequest(BaseModel):
 
 class ResolveRequest(BaseModel):
     resolution_note: str
-    resolved_by: str = "user"
+    # Deprecated: resolver identity now comes from the session; accepted but ignored.
+    resolved_by: str | None = None
 
 
 class BulkResolveRequest(BaseModel):
     result_ids: list[uuid.UUID]
     resolution_note: str
-    resolved_by: str = "user"
+    # Deprecated: resolver identity now comes from the session; accepted but ignored.
+    resolved_by: str | None = None
 
 
 class ConfigUpdate(BaseModel):
@@ -37,13 +39,15 @@ class ConfigUpdate(BaseModel):
 
 class ApproveRequest(BaseModel):
     """Confirm a matched result during human review."""
-    reviewer_id: str
+    # Deprecated: reviewer identity now comes from the session; accepted but ignored.
+    reviewer_id: str | None = None
     note: str | None = None
 
 
 class RejectRequest(BaseModel):
     """Flag a result as a discrepancy during human review. Reason is required."""
-    reviewer_id: str
+    # Deprecated: reviewer identity now comes from the session; accepted but ignored.
+    reviewer_id: str | None = None
     reason: str
 
 

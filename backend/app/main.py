@@ -5,7 +5,18 @@ from fastapi import Depends, FastAPI
 from fastapi.responses import HTMLResponse
 
 from app.auth_deps import enforce_org_scope
-from app.routers import auth, chat, erp, invoices, orgs, reconciliation, statements
+from app.routers import (
+    auth,
+    chat,
+    erp,
+    escalations,
+    invoices,
+    notifications,
+    orgs,
+    reconciliation,
+    signoffs,
+    statements,
+)
 
 # Configure logging so reconciliation debug output is visible
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s: %(message)s")
@@ -25,6 +36,9 @@ app.include_router(erp.router, dependencies=_protected)
 app.include_router(orgs.router, dependencies=_protected)
 app.include_router(reconciliation.router, dependencies=_protected)
 app.include_router(invoices.router, dependencies=_protected)
+app.include_router(escalations.router, dependencies=_protected)
+app.include_router(signoffs.router, dependencies=_protected)
+app.include_router(notifications.router, dependencies=_protected)
 
 
 @app.get("/health")

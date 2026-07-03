@@ -33,6 +33,12 @@ def main() -> int:
         "--plan", default="growth", choices=["starter", "growth", "enterprise"]
     )
     parser.add_argument("--superuser", action="store_true", help="Grant cross-org access")
+    parser.add_argument(
+        "--role",
+        default="accountant",
+        choices=["admin", "accountant"],
+        help="Account-level role (admins acknowledge escalations and sign off periods)",
+    )
     parser.add_argument("--org-id", default=None, help="Existing org UUID to attach")
     parser.add_argument(
         "--org-name",
@@ -53,6 +59,7 @@ def main() -> int:
             user.full_name = args.name or user.full_name
             user.is_active = True
             user.is_superuser = args.superuser or user.is_superuser
+            user.role = args.role
             print(f"Updated existing user {email} (account: {account.name})")
         else:
             account = Account(
@@ -67,6 +74,7 @@ def main() -> int:
                 full_name=args.name,
                 is_active=True,
                 is_superuser=args.superuser,
+                role=args.role,
             )
             db.add(user)
             print(f"Created account '{account.name}' and user {email}")

@@ -83,6 +83,10 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     # Superusers bypass per-org access scoping (used for the seed/admin account).
     is_superuser: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # role: admin | accountant — account-level permission tier. Admins can
+    # acknowledge/resolve escalations and sign off (lock) periods. Orthogonal
+    # to is_superuser, which is for platform staff.
+    role: Mapped[str] = mapped_column(String, nullable=False, default="accountant")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -430,3 +434,149 @@ class InvoiceLineItem(Base):
     raw_fields: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     invoice: Mapped[Invoice] = relationship(back_populates="line_items")
+
+
+class Escalation(Base):
+    """An issue raised by an accountant for admin review.
+
+    Anchored to an org + period; optionally pinned to a specific supplier
+    and/or reconciliation result (discrepancy line). Free-form escalations
+    carry only title/description.
+    """
+
+    __tablename__ = "escalations"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    # Denormalized tenant key so admin fan-out and list scoping never need joins.
+    account_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    supplier_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True
+    )
+    result_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("reconciliation_results.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    period: Mapped[str] = mapped_column(String, nullable=False)
+
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # status: open | acknowledged | resolved
+    status: Mapped[str] = mapped_column(String, nullable=False, default="open")
+
+    raised_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    acknowledged_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    acknowledged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    resolved_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    raised_by: Mapped["User | None"] = relationship(foreign_keys=[raised_by_id])
+    acknowledged_by: Mapped["User | None"] = relationship(
+        foreign_keys=[acknowledged_by_id]
+    )
+    resolved_by: Mapped["User | None"] = relationship(foreign_keys=[resolved_by_id])
+    supplier: Mapped["Supplier | None"] = relationship()
+
+
+class PeriodSignoff(Base):
+    """Month-end sign-off state for an org + period.
+
+    One mutable current-state row per (org, period) — not an event log. While
+    status is "signed_off" the period is LOCKED: mutating endpoints reject
+    with 423 (see app/period_lock.py). An admin may reopen, which unlocks.
+    """
+
+    __tablename__ = "period_signoffs"
+    __table_args__ = (
+        UniqueConstraint("org_id", "period", name="uq_period_signoffs_org_period"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    period: Mapped[str] = mapped_column(String, nullable=False)
+    # status: signed_off | reopened
+    status: Mapped[str] = mapped_column(String, nullable=False, default="signed_off")
+
+    signed_off_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    signed_off_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    reopened_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    reopened_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    reopen_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    signed_off_by: Mapped["User | None"] = relationship(foreign_keys=[signed_off_by_id])
+    reopened_by: Mapped["User | None"] = relationship(foreign_keys=[reopened_by_id])
+
+
+class Notification(Base):
+    """An in-app notification addressed to a single user.
+
+    `payload` carries i18n tokens (actor_name, period, org_name, supplier_name,
+    escalation_title, note) — the frontend renders localized text from
+    type + payload, so no English is baked in here. Rows are only ever created
+    via app/notifications.py so fan-out rules live in one place.
+    """
+
+    __tablename__ = "notifications"
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    # type: escalation_created | escalation_acknowledged | escalation_resolved
+    #     | period_signed_off | period_reopened
+    type: Mapped[str] = mapped_column(String, nullable=False)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+
+    escalation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("escalations.id", ondelete="SET NULL"), nullable=True
+    )
+    org_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=True
+    )
+    period: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    read_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

@@ -37,6 +37,8 @@ class MeResponse(BaseModel):
     email: str
     full_name: str | None
     is_superuser: bool
+    # role: admin | accountant
+    role: str
     account: AccountSummary
     organizations: list[OrgSummary]
 
@@ -67,6 +69,7 @@ def _me_payload(user: User, db: Session) -> MeResponse:
         email=user.email,
         full_name=user.full_name,
         is_superuser=user.is_superuser,
+        role=user.role,
         account=AccountSummary(
             id=str(user.account.id),
             name=user.account.name,

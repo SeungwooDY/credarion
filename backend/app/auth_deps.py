@@ -50,6 +50,21 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
     return user
 
 
+def require_admin(user: User = Depends(get_current_user)) -> User:
+    """403 unless the user is an account admin.
+
+    Platform superusers pass too — they must be able to unstick pilot
+    accounts, and this keeps the test-suite superuser override working for
+    non-role-specific tests.
+    """
+    if user.role != "admin" and not user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin role required",
+        )
+    return user
+
+
 def authorize_org(
     db: Session, user: User, org_id: uuid.UUID | str | None
 ) -> None:
