@@ -13,6 +13,8 @@ services:
     # (preDeployCommand requires a paid plan, which we're now on.)
     preDeployCommand: alembic upgrade head
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    # DB-free liveness probe — lets Render detect and restart a wedged instance.
+    healthCheckPath: /health
     envVars:
       - key: APP_ENV
         value: production

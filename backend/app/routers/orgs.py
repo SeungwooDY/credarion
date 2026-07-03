@@ -34,7 +34,7 @@ class SupplierResponse(BaseModel):
 
 
 @router.post("", response_model=OrgResponse, status_code=201)
-async def create_org(
+def create_org(
     body: OrgCreate,
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
@@ -52,7 +52,7 @@ async def create_org(
 
 
 @router.get("", response_model=list[OrgResponse])
-async def list_orgs(
+def list_orgs(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[OrgResponse]:
@@ -68,7 +68,7 @@ async def list_orgs(
 
 
 @router.get("/{org_id}/suppliers", response_model=list[SupplierResponse])
-async def list_suppliers(
+def list_suppliers(
     org_id: uuid.UUID,
     db: Session = Depends(get_db),
 ) -> list[SupplierResponse]:

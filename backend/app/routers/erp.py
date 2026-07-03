@@ -32,7 +32,7 @@ class GRNIngestionResponse(BaseModel):
 
 
 @router.post("/upload", response_model=GRNIngestionResponse, status_code=201)
-async def upload_grn(
+def upload_grn(
     file: UploadFile = File(...),
     org_id: uuid.UUID = Form(...),
     db: Session = Depends(get_db),
@@ -76,7 +76,7 @@ async def upload_grn(
 
 
 @router.post("/upload-stream")
-async def upload_grn_stream(
+def upload_grn_stream(
     file: UploadFile = File(...),
     org_id: uuid.UUID = Form(...),
     db: Session = Depends(get_db),

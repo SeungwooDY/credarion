@@ -27,13 +27,11 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Already-authenticated visitor hitting the login page → send to dashboard.
-  if (hasSession && pathname === "/login") {
-    const url = request.nextUrl.clone();
-    url.pathname = "/";
-    url.search = "";
-    return NextResponse.redirect(url);
-  }
+  // NOTE: we deliberately do NOT bounce cookie-holders away from /login.
+  // The cookie check here is presence-only, so an expired/stale cookie (e.g.
+  // after a failed logout while the backend was unreachable) would otherwise
+  // cause a redirect loop: /login → / → API 401 → /login → … Landing on the
+  // login page with a stale cookie is fine — signing in overwrites it.
 
   return NextResponse.next();
 }

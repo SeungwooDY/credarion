@@ -89,7 +89,7 @@ class ColumnMappingUpdate(BaseModel):
 
 
 @router.post("/preview", response_model=PreviewResponse)
-async def preview_statement(
+def preview_statement(
     file: UploadFile = File(...),
     org_id: uuid.UUID = Form(...),
     db: Session = Depends(get_db),
@@ -186,7 +186,7 @@ async def preview_statement(
 
 
 @router.get("/check")
-async def check_existing(
+def check_existing(
     supplier_id: uuid.UUID = Query(...),
     period: str = Query(...),
     db: Session = Depends(get_db),
@@ -274,7 +274,7 @@ async def upload_statement(
 
 
 @router.put("/mappings/{mapping_id}", response_model=ColumnMappingResponse)
-async def update_mapping(
+def update_mapping(
     mapping_id: uuid.UUID,
     body: ColumnMappingUpdate,
     db: Session = Depends(get_db),
@@ -299,7 +299,7 @@ async def update_mapping(
 
 
 @router.get("/mappings/{supplier_id}", response_model=ColumnMappingResponse)
-async def get_mapping(
+def get_mapping(
     supplier_id: uuid.UUID,
     db: Session = Depends(get_db),
 ) -> ColumnMappingResponse:

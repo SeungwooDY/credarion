@@ -112,7 +112,7 @@ def _result_to_detail(r: ReconciliationResult) -> ResultDetail:
 
 
 @router.get("/suppliers-ready")
-async def list_suppliers_with_readiness(
+def list_suppliers_with_readiness(
     org_id: uuid.UUID = Query(...),
     period: str = Query(...),
     db: Session = Depends(get_db),
@@ -245,7 +245,7 @@ async def list_suppliers_with_readiness(
 
 
 @router.get("/dashboard")
-async def dashboard_overview(
+def dashboard_overview(
     org_id: uuid.UUID | None = Query(None),
     period: str | None = Query(None),
     db: Session = Depends(get_db),
@@ -521,7 +521,7 @@ async def trigger_reconciliation(
 
 
 @router.get("/runs", response_model=list[RunSummary])
-async def list_runs(
+def list_runs(
     supplier_id: uuid.UUID | None = None,
     period: str | None = None,
     status: str | None = None,
@@ -542,7 +542,7 @@ async def list_runs(
 
 
 @router.get("/runs/{run_id}", response_model=RunSummary)
-async def get_run(
+def get_run(
     run_id: uuid.UUID,
     db: Session = Depends(get_db),
 ) -> RunSummary:
@@ -554,7 +554,7 @@ async def get_run(
 
 
 @router.get("/results", response_model=list[ResultDetail])
-async def list_results(
+def list_results(
     run_id: uuid.UUID | None = None,
     status: str | None = None,
     match_type: str | None = None,
@@ -578,7 +578,7 @@ async def list_results(
 
 
 @router.get("/results/{result_id}", response_model=ResultDetail)
-async def get_result(
+def get_result(
     result_id: uuid.UUID,
     db: Session = Depends(get_db),
 ) -> ResultDetail:
@@ -590,7 +590,7 @@ async def get_result(
 
 
 @router.put("/results/{result_id}/resolve", response_model=ResultDetail)
-async def resolve_result(
+def resolve_result(
     result_id: uuid.UUID,
     body: ResolveRequest,
     db: Session = Depends(get_db),
@@ -612,7 +612,7 @@ async def resolve_result(
 
 
 @router.post("/results/bulk-resolve", response_model=list[ResultDetail])
-async def bulk_resolve(
+def bulk_resolve(
     body: BulkResolveRequest,
     db: Session = Depends(get_db),
 ) -> list[ResultDetail]:
@@ -644,7 +644,7 @@ async def bulk_resolve(
 
 
 @router.get("/summary", response_model=list[SupplierReconciliationSummary])
-async def reconciliation_summary(
+def reconciliation_summary(
     db: Session = Depends(get_db),
 ) -> list[SupplierReconciliationSummary]:
     """Get reconciliation status per supplier for the UI dashboard."""
@@ -679,7 +679,7 @@ async def reconciliation_summary(
 
 
 @router.get("/export")
-async def export_results(
+def export_results(
     run_id: uuid.UUID | None = None,
     supplier_id: uuid.UUID | None = None,
     period: str | None = None,
@@ -741,7 +741,7 @@ async def export_results(
 
 
 @router.get("/mismatches")
-async def list_mismatches(
+def list_mismatches(
     org_id: uuid.UUID = Query(...),
     period: str = Query(...),
     supplier_id: uuid.UUID | None = None,
@@ -893,7 +893,7 @@ async def list_mismatches(
 
 
 @router.get("/config/{org_id}", response_model=ConfigResponse)
-async def get_config(
+def get_config(
     org_id: uuid.UUID,
     db: Session = Depends(get_db),
 ) -> ConfigResponse:
@@ -924,7 +924,7 @@ async def get_config(
 
 
 @router.put("/config/{org_id}", response_model=ConfigResponse)
-async def update_config(
+def update_config(
     org_id: uuid.UUID,
     body: ConfigUpdate,
     db: Session = Depends(get_db),
@@ -972,7 +972,7 @@ async def update_config(
 
 
 @router.post("/{result_id}/approve", response_model=ReviewActionResponse)
-async def approve_result(
+def approve_result(
     result_id: uuid.UUID,
     body: ApproveRequest,
     db: Session = Depends(get_db),
@@ -1000,7 +1000,7 @@ async def approve_result(
 
 
 @router.post("/{result_id}/reject", response_model=ReviewActionResponse)
-async def reject_result(
+def reject_result(
     result_id: uuid.UUID,
     body: RejectRequest,
     db: Session = Depends(get_db),
@@ -1032,7 +1032,7 @@ async def reject_result(
 
 
 @router.get("/{supplier_id}/{period}", response_model=list[ResultDetail])
-async def review_queue(
+def review_queue(
     supplier_id: uuid.UUID,
     period: str,
     db: Session = Depends(get_db),
