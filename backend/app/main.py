@@ -16,6 +16,7 @@ from app.routers import (
     reconciliation,
     signoffs,
     statements,
+    users,
 )
 
 # Configure logging so reconciliation debug output is visible
@@ -39,6 +40,7 @@ app.include_router(invoices.router, dependencies=_protected)
 app.include_router(escalations.router, dependencies=_protected)
 app.include_router(signoffs.router, dependencies=_protected)
 app.include_router(notifications.router, dependencies=_protected)
+app.include_router(users.router, dependencies=_protected)
 
 
 @app.get("/health")

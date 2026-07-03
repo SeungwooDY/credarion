@@ -351,6 +351,33 @@ export function useNotifications() {
   };
 }
 
+// ── Team management ──────────────────────────────────────────
+
+export interface TeamMember {
+  id: string;
+  email: string;
+  full_name: string | null;
+  role: "admin" | "accountant";
+  is_active: boolean;
+  is_superuser: boolean;
+  created_at: string;
+}
+
+/** Admin-only: the account's users. Non-admins get a 403 → key stays null via `enabled`. */
+export function useTeam(enabled: boolean) {
+  const { data, error, isLoading, mutate } = useSWR<TeamMember[]>(
+    enabled ? "/users" : null,
+    fetcher,
+    swrDefaults
+  );
+  return {
+    team: data ?? [],
+    teamLoading: isLoading,
+    teamError: error,
+    refreshTeam: () => mutate(),
+  };
+}
+
 // ── Period sign-off ──────────────────────────────────────────
 
 export interface SignoffStatus {

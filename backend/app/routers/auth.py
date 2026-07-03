@@ -9,7 +9,7 @@ from app.auth_deps import get_current_user
 from app.config import settings
 from app.db import get_db
 from app.models import Organization, User
-from app.security import create_access_token, verify_password
+from app.security import create_access_token, hash_password, verify_password
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -122,3 +122,29 @@ def logout(response: Response) -> dict[str, bool]:
 def me(user: User = Depends(get_current_user), db: Session = Depends(get_db)) -> MeResponse:
     """Return the current user along with their account and accessible orgs."""
     return _me_payload(user, db)
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.post("/change-password")
+def change_password(
+    body: ChangePasswordRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, bool]:
+    """Let the logged-in user replace their (possibly temporary) password."""
+    if not verify_password(body.current_password, user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect",
+        )
+    if len(body.new_password) < 8:
+        raise HTTPException(
+            status_code=400, detail="Password must be at least 8 characters"
+        )
+    user.hashed_password = hash_password(body.new_password)
+    db.commit()
+    return {"ok": True}
