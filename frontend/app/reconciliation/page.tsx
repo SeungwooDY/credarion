@@ -3,15 +3,12 @@
 import { useEffect, useState, useRef } from "react";
 import { ChevronDown, ChevronRight, Check, Flag } from "lucide-react";
 import PageHeader from "../components/page-header";
-import { useCurrentOrg, useSuppliers, type ReviewItem, type SupplierReady } from "../lib/swr";
+import { useCurrentOrg, useSignoff, useSuppliers, type ReviewItem, type SupplierReady } from "../lib/swr";
 import { CARD } from "@/app/lib/ui";
 import { useT, type TFunction } from "@/app/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { MonthPicker } from "@/components/ui/month-picker";
-
-// Identifier recorded against confirm/flag actions.
-const REVIEWER_ID = "accountant";
 
 interface RunResult {
   run: {
@@ -272,6 +269,7 @@ function SupplierRow({
   s,
   active,
   loading,
+  locked,
   selectedId,
   onRun,
   t,
@@ -279,6 +277,7 @@ function SupplierRow({
   s: SupplierReady;
   active: boolean;
   loading: boolean;
+  locked: boolean;
   selectedId: string;
   onRun: (id: string) => void;
   t: TFunction;
@@ -350,7 +349,8 @@ function SupplierRow({
       <td className="px-4 py-3 text-center">
         <button
           onClick={() => onRun(s.id)}
-          disabled={!s.ready || loading}
+          disabled={!s.ready || loading || locked}
+          title={locked ? t("lock.action_blocked") : undefined}
           className="px-3.5 py-1.5 text-xs font-medium text-white rounded-lg bg-accent hover:bg-accent-dark disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
         >
           {loading && selectedId === s.id ? t("reconciliation.running") : t("common.run")}
@@ -365,6 +365,7 @@ export default function ReconciliationPage() {
   const { orgId } = useCurrentOrg();
   const [period, setPeriod] = useState("2026-03");
   const { suppliers, suppliersLoading, refreshSuppliers } = useSuppliers(orgId, period);
+  const { locked, signoff, refreshSignoff } = useSignoff(orgId, period);
 
   const [supplierId, setSupplierId] = useState("");
   const [loading, setLoading] = useState(false);
@@ -422,16 +423,28 @@ export default function ReconciliationPage() {
     setLoading(false);
   }
 
+  /** Shared 423 handling: the period was signed off under us — refresh + explain. */
+  function handleLocked(res: Response): boolean {
+    if (res.status === 423) {
+      setError(t("lock.action_blocked"));
+      refreshSignoff();
+      return true;
+    }
+    return false;
+  }
+
   async function confirmOne(id: string) {
     setBusy(true);
     try {
-      await fetch(`/api/v1/reconciliation/${id}/approve`, {
+      const res = await fetch(`/api/v1/reconciliation/${id}/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reviewer_id: REVIEWER_ID }),
+        body: JSON.stringify({}),
       });
-      await loadQueue(supplierId);
-      refreshSuppliers();
+      if (!handleLocked(res)) {
+        await loadQueue(supplierId);
+        refreshSuppliers();
+      }
     } catch {
       setError(t("review.action_failed"));
     }
@@ -445,15 +458,16 @@ export default function ReconciliationPage() {
     if (ids.length === 0) return;
     setBusy(true);
     try {
-      await Promise.all(
+      const responses = await Promise.all(
         ids.map((id) =>
           fetch(`/api/v1/reconciliation/${id}/approve`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ reviewer_id: REVIEWER_ID }),
+            body: JSON.stringify({}),
           })
         )
       );
+      responses.find((r) => handleLocked(r));
       await loadQueue(supplierId);
       refreshSuppliers();
     } catch {
@@ -466,14 +480,16 @@ export default function ReconciliationPage() {
     if (!rejectTarget) return;
     setBusy(true);
     try {
-      await fetch(`/api/v1/reconciliation/${rejectTarget.id}/reject`, {
+      const res = await fetch(`/api/v1/reconciliation/${rejectTarget.id}/reject`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reviewer_id: REVIEWER_ID, reason }),
+        body: JSON.stringify({ reason }),
       });
       setRejectTarget(null);
-      await loadQueue(supplierId);
-      refreshSuppliers();
+      if (!handleLocked(res)) {
+        await loadQueue(supplierId);
+        refreshSuppliers();
+      }
     } catch {
       setError(t("review.action_failed"));
     }
@@ -500,6 +516,20 @@ export default function ReconciliationPage() {
         title={t("reconciliation.title")}
         description={t("reconciliation.description")}
       />
+
+      {/* Locked-period banner */}
+      {locked && (
+        <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+            <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          {t("signoff.locked_banner", {
+            period,
+            name: signoff?.signed_off_by_name ?? "—",
+          })}
+        </div>
+      )}
 
       {/* Controls */}
       <div className="flex gap-4 items-end mb-6">
@@ -546,6 +576,7 @@ export default function ReconciliationPage() {
             <tbody>
               {suppliers.map((s) => (
                 <SupplierRow
+                  locked={locked}
                   key={s.id}
                   s={s}
                   active={s.id === supplierId}
@@ -635,7 +666,7 @@ export default function ReconciliationPage() {
                             item={item}
                             showNote={sec.showNote}
                             readOnly={sec.readOnly}
-                            busy={busy}
+                            busy={busy || locked}
                             onConfirm={confirmOne}
                             onFlag={(it) => setRejectTarget(it)}
                             t={t}
@@ -664,7 +695,7 @@ export default function ReconciliationPage() {
                       <div key={item.id} className="border-l-4 border-l-zinc-200">
                         <ReviewRow
                           item={item}
-                          busy={busy}
+                          busy={busy || locked}
                           onConfirm={confirmOne}
                           onFlag={(it) => setRejectTarget(it)}
                           t={t}
@@ -688,7 +719,7 @@ export default function ReconciliationPage() {
         open={rejectTarget !== null}
         onClose={() => setRejectTarget(null)}
         onSubmit={submitReject}
-        busy={busy}
+        busy={busy || locked}
         t={t}
       />
     </>

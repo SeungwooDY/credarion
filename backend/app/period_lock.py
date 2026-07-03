@@ -35,13 +35,11 @@ def ensure_period_unlocked(db: Session, org_id: uuid.UUID, period: str) -> None:
         .first()
     )
     if signoff is not None:
+        # Plain-string detail: existing frontend error paths render `detail`
+        # directly, and clients detect the lock via the 423 status code.
         raise HTTPException(
             status_code=423,
-            detail={
-                "message": f"Period {period} has been signed off and is locked",
-                "org_id": str(org_id),
-                "period": period,
-            },
+            detail=f"Period {period} has been signed off and is locked",
         )
 
 

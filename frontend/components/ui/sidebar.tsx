@@ -9,6 +9,7 @@ import {
   FileText,
   Home,
   LogOut,
+  Megaphone,
   Settings,
   TriangleAlert,
   Upload,
@@ -27,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { LanguageToggle } from "@/components/ui/language-toggle";
+import NotificationBellContainer from "@/app/components/notification-bell-container";
 import { useT } from "@/app/lib/i18n";
 import { useMe } from "@/app/lib/swr";
 
@@ -104,6 +106,7 @@ const NAV_ITEMS: NavItem[] = [
   { labelKey: "nav.ingestion", url: "/ingestion", icon: Upload },
   { labelKey: "nav.reconciliation", url: "/reconciliation", icon: CircleCheck },
   { labelKey: "nav.mismatches", url: "/mismatches", icon: TriangleAlert },
+  { labelKey: "nav.escalations", url: "/escalations", icon: Megaphone },
   // Invoices hidden for now — kept here to restore when Phase 2 ships.
   // { labelKey: "nav.invoices", url: "/invoices", icon: FileText, comingSoon: true },
   { labelKey: "nav.settings", url: "/settings", icon: Settings },
@@ -224,6 +227,11 @@ export function SessionNavBar() {
                     </div>
                   )}
                 </motion.li>
+
+                {/* Notifications — always visible (badge works even collapsed) */}
+                <div className="px-0.5">
+                  <NotificationBellContainer />
+                </div>
 
                 {/* Account */}
                 <DropdownMenu modal={false}>
