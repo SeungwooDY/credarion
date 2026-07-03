@@ -1,11 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { Lock, LockOpen } from "lucide-react";
+import { createPortal } from "react-dom";
+import { AlertTriangle, CheckCircle2, Lock, LockOpen } from "lucide-react";
 import { MonthPicker } from "@/components/ui/month-picker";
 import { CARD } from "@/app/lib/ui";
 import { useT } from "@/app/lib/i18n";
-import { useCurrentOrg, useIsAdmin, useSignoff } from "@/app/lib/swr";
+import {
+  useCurrentOrg,
+  useEscalations,
+  useIsAdmin,
+  useSignoff,
+  useSuppliers,
+} from "@/app/lib/swr";
 
 function currentPeriod(): string {
   const now = new Date();
@@ -28,6 +35,17 @@ export default function SignoffCard() {
   const [confirming, setConfirming] = useState<"sign" | "reopen" | null>(null);
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Readiness summary — fetched only while the sign-off confirmation is open,
+  // so the admin sees exactly what state they're about to lock.
+  const signing = confirming === "sign";
+  const { suppliers } = useSuppliers(signing ? orgId : "", period);
+  const { escalations } = useEscalations(signing ? orgId : "", { period });
+  const pendingReview = suppliers.reduce((n, s) => n + s.pending_review, 0);
+  const unmatched = suppliers.reduce((n, s) => n + s.unmatched, 0);
+  const notReady = suppliers.filter((s) => !s.ready).length;
+  const openEscalations = escalations.filter((e) => e.status !== "resolved").length;
+  const issueCount = pendingReview + unmatched + notReady + openEscalations;
 
   async function submit() {
     if (!confirming) return;
@@ -120,49 +138,91 @@ export default function SignoffCard() {
         <p className="mt-2 text-xs text-zinc-500 pl-6">“{signoff.note}”</p>
       )}
 
-      {confirming && (
-        <div
-          className="fixed inset-0 bg-black/30 flex items-center justify-center z-50"
-          onClick={() => setConfirming(null)}
-        >
+      {/* Portaled to <body>: the dashboard root is animated (transformed), which
+          would otherwise make position:fixed center on the page, not the viewport. */}
+      {confirming &&
+        createPortal(
           <div
-            className="bg-card rounded-2xl shadow-xl w-full max-w-md p-5"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 bg-black/30 flex items-center justify-center z-50"
+            onClick={() => setConfirming(null)}
           >
-            <h3 className="font-semibold text-sm mb-3">
-              {confirming === "sign"
-                ? t("signoff.sign_off", { period })
-                : `${t("signoff.reopen")} — ${period}`}
-            </h3>
-            <label className="block text-xs font-medium text-zinc-500 mb-1">
-              {t("signoff.note")}
-            </label>
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              placeholder={t("signoff.note_placeholder")}
-              className="w-full border border-border rounded-lg px-3 py-2 text-sm h-20 resize-none focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
-            />
-            <div className="flex gap-2 mt-4 justify-end">
-              <button
-                onClick={() => setConfirming(null)}
-                className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted transition-colors"
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                onClick={submit}
-                disabled={busy}
-                className="px-3 py-1.5 text-xs rounded-lg bg-accent text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
-              >
+            <div
+              className="bg-card rounded-2xl shadow-xl w-full max-w-md p-5"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <h3 className="font-semibold text-sm mb-3">
                 {confirming === "sign"
-                  ? t("signoff.confirm")
-                  : t("signoff.confirm_reopen")}
-              </button>
+                  ? t("signoff.sign_off", { period })
+                  : `${t("signoff.reopen")} — ${period}`}
+              </h3>
+
+              {/* Readiness summary — what you're about to lock */}
+              {signing &&
+                (issueCount > 0 ? (
+                  <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+                    <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-800">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                      {t("signoff.outstanding", { n: issueCount })}
+                    </div>
+                    <ul className="mt-1.5 space-y-0.5 pl-5 text-xs text-amber-800">
+                      {pendingReview > 0 && (
+                        <li>{t("signoff.pending_review", { n: pendingReview })}</li>
+                      )}
+                      {unmatched > 0 && (
+                        <li>{t("signoff.unmatched_lines", { n: unmatched })}</li>
+                      )}
+                      {notReady > 0 && (
+                        <li>{t("signoff.suppliers_not_ready", { n: notReady })}</li>
+                      )}
+                      {openEscalations > 0 && (
+                        <li>{t("signoff.open_escalations", { n: openEscalations })}</li>
+                      )}
+                    </ul>
+                    <p className="mt-1.5 pl-5 text-xs text-amber-700">
+                      {t("signoff.outstanding_hint")}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="mb-3 flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs font-medium text-emerald-800">
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                    {t("signoff.all_clear")}
+                  </div>
+                ))}
+
+              <label className="block text-xs font-medium text-zinc-500 mb-1">
+                {t("signoff.note")}
+              </label>
+              <textarea
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder={t("signoff.note_placeholder")}
+                className="w-full border border-border rounded-lg px-3 py-2 text-sm h-20 resize-none focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
+              />
+              <div className="flex gap-2 mt-4 justify-end">
+                <button
+                  onClick={() => setConfirming(null)}
+                  className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted transition-colors"
+                >
+                  {t("common.cancel")}
+                </button>
+                <button
+                  onClick={submit}
+                  disabled={busy}
+                  className={`px-3 py-1.5 text-xs rounded-lg text-white hover:opacity-90 disabled:opacity-50 transition-opacity ${
+                    signing && issueCount > 0 ? "bg-amber-600" : "bg-accent"
+                  }`}
+                >
+                  {signing
+                    ? issueCount > 0
+                      ? t("signoff.confirm_anyway")
+                      : t("signoff.confirm")
+                    : t("signoff.confirm_reopen")}
+                </button>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
