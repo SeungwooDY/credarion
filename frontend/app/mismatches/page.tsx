@@ -546,8 +546,13 @@ function SupplierCard({
           {/* Items table */}
           <div className="overflow-auto max-h-[70vh]">
             <table className="w-full text-xs">
+              {/* Sticky-header note: collapsed table borders don't travel with
+                  position:sticky, which left a 1px see-through gap where rows
+                  showed beneath the header. The header hairlines are drawn as
+                  inset shadows on the th cells instead — shadows are painted by
+                  the sticky element itself, so the edge stays sealed. */}
               <thead className="sticky top-0 z-10">
-                <tr className="border-t border-b border-border bg-zinc-50 text-zinc-500">
+                <tr className="bg-zinc-50 text-zinc-500 [&>th]:shadow-[inset_0_1px_0_var(--color-border),inset_0_-1px_0_var(--color-border)]">
                   <th className="text-center px-2 py-2 w-8 sticky top-0 bg-zinc-50">
                     <input
                       type="checkbox"
