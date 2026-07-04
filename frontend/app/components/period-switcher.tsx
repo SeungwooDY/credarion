@@ -58,10 +58,17 @@ export default function PeriodSwitcher({ isCollapsed }: { isCollapsed: boolean }
   const t = useT();
   const { orgId } = useCurrentOrg();
   const { period, setPeriod } = usePeriod();
-  const { periods } = usePeriods(orgId);
+  const { periods, refreshPeriods } = usePeriods(orgId);
   const label = usePeriodLabel(period);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  // Lock flags change when admins sign off / reopen — refetch on open so the
+  // dropdown never shows stale locks.
+  useEffect(() => {
+    if (open) refreshPeriods();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // Default once periods load: latest month with data, else current month.
   useEffect(() => {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useSWRConfig } from "swr";
 import { createPortal } from "react-dom";
 import { AlertTriangle, CheckCircle2, Lock, LockOpen } from "lucide-react";
 import { PeriodBadge } from "@/app/components/period-switcher";
@@ -25,6 +26,7 @@ import {
  */
 export default function SignoffCard() {
   const t = useT();
+  const { mutate } = useSWRConfig();
   const { orgId } = useCurrentOrg();
   const isAdmin = useIsAdmin();
   const { period } = usePeriod();
@@ -62,6 +64,9 @@ export default function SignoffCard() {
         }
       );
       refreshSignoff();
+      // The sidebar switcher's period list caches lock flags — invalidate it
+      // so the lock icon appears/disappears immediately after sign-off/reopen.
+      mutate(`/periods?org_id=${orgId}`);
     } catch {
       // state refresh will reflect reality
     }
