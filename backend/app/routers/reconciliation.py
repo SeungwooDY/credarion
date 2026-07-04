@@ -12,6 +12,10 @@ from sqlalchemy.orm import Session
 
 from app.auth_deps import authorize_supplier, get_current_user
 from app.db import get_db
+from app.period_lock import (
+    ensure_result_period_unlocked,
+    ensure_supplier_period_unlocked,
+)
 from app.models import (
     ERPRecord,
     Organization,
@@ -475,6 +479,7 @@ async def trigger_reconciliation(
 ) -> ReconciliationRunResponse:
     """Trigger reconciliation for a supplier+period."""
     authorize_supplier(db, user, body.supplier_id)
+    ensure_supplier_period_unlocked(db, body.supplier_id, body.period)
     # Clean up stale "running" runs (stuck for > 5 minutes) before checking
     from datetime import timedelta
     stale_cutoff = datetime.utcnow() - timedelta(minutes=5)
@@ -594,17 +599,19 @@ def resolve_result(
     result_id: uuid.UUID,
     body: ResolveRequest,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> ResultDetail:
-    """Resolve a discrepancy with a note."""
+    """Resolve a discrepancy with a note. Resolver identity comes from the session."""
     r = db.query(ReconciliationResult).filter(ReconciliationResult.id == result_id).first()
     if not r:
         raise HTTPException(status_code=404, detail="Result not found")
+    ensure_result_period_unlocked(db, r)
     if r.status == "resolved":
         raise HTTPException(status_code=400, detail="Already resolved")
 
     r.status = "resolved"
     r.resolution_note = body.resolution_note
-    r.resolved_by = body.resolved_by
+    r.resolved_by = user.email
     r.resolved_at = datetime.utcnow()
     db.commit()
     db.refresh(r)
@@ -615,8 +622,9 @@ def resolve_result(
 def bulk_resolve(
     body: BulkResolveRequest,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> list[ResultDetail]:
-    """Bulk resolve multiple results."""
+    """Bulk resolve multiple results. Resolver identity comes from the session."""
     results = (
         db.query(ReconciliationResult)
         .filter(ReconciliationResult.id.in_(body.result_ids))
@@ -625,12 +633,17 @@ def bulk_resolve(
     if len(results) != len(body.result_ids):
         raise HTTPException(status_code=404, detail="Some results not found")
 
+    # A batch can span periods — check every distinct (supplier, period) pair
+    # BEFORE mutating anything, so a locked period rejects the whole batch.
+    for supplier_id, period in {(r.supplier_id, r.period) for r in results}:
+        ensure_supplier_period_unlocked(db, supplier_id, period)
+
     now = datetime.utcnow()
     for r in results:
         if r.status != "resolved":
             r.status = "resolved"
             r.resolution_note = body.resolution_note
-            r.resolved_by = body.resolved_by
+            r.resolved_by = user.email
             r.resolved_at = now
     db.commit()
 
@@ -976,22 +989,24 @@ def approve_result(
     result_id: uuid.UUID,
     body: ApproveRequest,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> ReviewActionResponse:
     """Confirm a matched result during human review.
 
-    Sets status='confirmed', records the reviewer and timestamp.
+    Sets status='confirmed', records the session user as reviewer + timestamp.
     409 if the result was already confirmed/rejected; 404 if not found.
     """
     r = db.query(ReconciliationResult).filter(ReconciliationResult.id == result_id).first()
     if not r:
         raise HTTPException(status_code=404, detail="Result not found")
+    ensure_result_period_unlocked(db, r)
     if r.status in _REVIEWED_STATUSES:
         raise HTTPException(
             status_code=409, detail=f"Result already {r.status}"
         )
 
     r.status = "confirmed"
-    r.reviewer_id = body.reviewer_id
+    r.reviewer_id = user.email
     r.reviewed_at = datetime.utcnow()
     if body.note:
         r.resolution_note = body.note
@@ -1004,11 +1019,12 @@ def reject_result(
     result_id: uuid.UUID,
     body: RejectRequest,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> ReviewActionResponse:
     """Flag a result as a discrepancy during human review.
 
     Requires a non-empty reason (stored in discrepancy_note). Sets
-    status='rejected', records reviewer + timestamp.
+    status='rejected', records the session user as reviewer + timestamp.
     400 if reason is empty; 409 if already confirmed/rejected; 404 if not found.
     """
     reason = (body.reason or "").strip()
@@ -1018,13 +1034,14 @@ def reject_result(
     r = db.query(ReconciliationResult).filter(ReconciliationResult.id == result_id).first()
     if not r:
         raise HTTPException(status_code=404, detail="Result not found")
+    ensure_result_period_unlocked(db, r)
     if r.status in _REVIEWED_STATUSES:
         raise HTTPException(
             status_code=409, detail=f"Result already {r.status}"
         )
 
     r.status = "rejected"
-    r.reviewer_id = body.reviewer_id
+    r.reviewer_id = user.email
     r.reviewed_at = datetime.utcnow()
     r.discrepancy_note = reason
     db.commit()

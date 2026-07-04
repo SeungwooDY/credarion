@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { getLocalTimeZone } from "@internationalized/date";
 import PageHeader from "./components/page-header";
+import SignoffCard from "./components/signoff-card";
 import { RoadmapCard, type RoadmapItem } from "@/components/ui/roadmap-card";
 import { CloseDatePicker } from "@/components/ui/close-date-picker";
 import { CARD } from "./lib/ui";
@@ -325,6 +326,9 @@ export default function DashboardPage() {
           )}
         </StatCard>
       </div>
+
+      {/* ── Month-end sign-off (admins can lock/reopen the period) ── */}
+      <SignoffCard />
 
       {/* ── Section 2: Action queue ── */}
       <div className={`${CARD} mt-6`}>

@@ -4,7 +4,7 @@ import { useState, useCallback } from "react";
 import PageHeader from "../components/page-header";
 import StatusBadge from "../components/status-badge";
 import SpreadsheetGrid, { type GridColumn, type GridRow } from "../components/spreadsheet-grid";
-import { useCurrentOrg, useMismatches } from "../lib/swr";
+import { useCurrentOrg, useMismatches, useSignoff } from "../lib/swr";
 import { RippleButton } from "@/components/ui/multi-type-ripple-buttons";
 import { CARD } from "@/app/lib/ui";
 import { useT, type TFunction } from "@/app/lib/i18n";
@@ -321,17 +321,25 @@ function SupplierCard({
   expanded,
   onToggle,
   onItemsResolved,
+  orgId,
+  period,
+  locked,
 }: {
   supplier: SupplierMismatch;
   expanded: boolean;
   onToggle: () => void;
   onItemsResolved: (resolvedIds: string[]) => void;
+  orgId: string;
+  period: string;
+  locked: boolean;
 }) {
   const t = useT();
   const s = supplier;
   const [filter, setFilter] = useState<FilterType>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [resolveItems, setResolveItems] = useState<MismatchItem[] | null>(null);
+  const [escalateItem, setEscalateItem] = useState<MismatchItem | null>(null);
+  const [escalatedOk, setEscalatedOk] = useState(false);
 
   const matchColor =
     s.match_rate == null
@@ -495,9 +503,24 @@ function SupplierCard({
                     const items = filteredItems.filter((i) => selected.has(i.id));
                     setResolveItems(items);
                   }}
-                  className="px-3 py-1 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+                  disabled={locked}
+                  title={locked ? t("lock.action_blocked") : undefined}
+                  className="px-3 py-1 text-xs bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {t("mismatches.resolve_n_selected", { n: selected.size })}
+                </button>
+              )}
+              {/* Escalation stays enabled under lock — raising issues about a
+                  signed-off period is exactly the workflow the lock creates. */}
+              {selected.size === 1 && (
+                <button
+                  onClick={() => {
+                    const item = filteredItems.find((i) => selected.has(i.id));
+                    if (item) setEscalateItem(item);
+                  }}
+                  className="px-3 py-1 text-xs bg-red-500 text-white rounded-lg hover:bg-red-600 transition-colors"
+                >
+                  {t("esc.escalate")}
                 </button>
               )}
               {unresolvedItems.length > 0 && selected.size === 0 && (
@@ -678,6 +701,116 @@ function SupplierCard({
           }}
         />
       )}
+      {escalateItem && (
+        <EscalateModal
+          item={escalateItem}
+          supplierName={s.supplier_name}
+          orgId={orgId}
+          period={period}
+          onClose={() => setEscalateItem(null)}
+          onEscalated={() => {
+            setSelected(new Set());
+            setEscalatedOk(true);
+            setTimeout(() => setEscalatedOk(false), 4000);
+          }}
+        />
+      )}
+      {escalatedOk && (
+        <div className="fixed bottom-4 right-4 z-50 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-800 shadow-lg">
+          {t("esc.escalated_ok")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EscalateModal({
+  item,
+  supplierName,
+  orgId,
+  period,
+  onClose,
+  onEscalated,
+}: {
+  item: MismatchItem;
+  supplierName: string;
+  orgId: string;
+  period: string;
+  onClose: () => void;
+  onEscalated: () => void;
+}) {
+  const t = useT();
+  // Prefill from the discrepancy so admins get context without clicking through.
+  const po = item.erp?.po_number || item.statement?.po_number || "";
+  const defaultTitle = `${supplierName}: ${item.discrepancy_type ?? "issue"}${po ? ` (PO ${po})` : ""}`;
+  const [title, setTitle] = useState(defaultTitle);
+  const [description, setDescription] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleEscalate() {
+    if (!title.trim()) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/v1/escalations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          org_id: orgId,
+          period,
+          title: title.trim(),
+          description: description.trim() || undefined,
+          result_id: item.id,
+        }),
+      });
+      if (res.ok) onEscalated();
+    } catch {
+      // non-fatal; user can retry
+    }
+    setSubmitting(false);
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-card rounded-2xl shadow-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-semibold text-sm mb-3">{t("esc.escalate")}</h3>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-zinc-500 mb-1">{t("esc.form.title")}</label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full border border-border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-zinc-500 mb-1">{t("esc.form.description")}</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder={t("esc.form.description_placeholder")}
+              className="w-full border border-border rounded-lg px-3 py-2 text-sm h-20 resize-none focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
+            />
+          </div>
+        </div>
+        <div className="flex gap-2 mt-4 justify-end">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted transition-colors"
+          >
+            {t("common.cancel")}
+          </button>
+          <button
+            onClick={handleEscalate}
+            disabled={submitting || !title.trim()}
+            className="px-3 py-1.5 text-xs rounded-lg bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 transition-colors"
+          >
+            {t("esc.form.submit")}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -950,6 +1083,7 @@ export default function MismatchesPage() {
   const [period, setPeriod] = useState("2026-03");
   const [showMatches, setShowMatches] = useState(false);
   const { data, mismatchesLoading: loading, mismatchesError, refreshMismatches } = useMismatches(orgId, period, showMatches);
+  const { locked, signoff } = useSignoff(orgId, period);
   const error = mismatchesError?.message ?? "";
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<ViewMode>("review");
@@ -989,6 +1123,20 @@ export default function MismatchesPage() {
         title={t("mismatches.title")}
         description={t("mismatches.description")}
       />
+
+      {/* Locked-period banner */}
+      {locked && (
+        <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+            <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          {t("signoff.locked_banner", {
+            period,
+            name: signoff?.signed_off_by_name ?? "—",
+          })}
+        </div>
+      )}
 
       {/* Controls */}
       <div className="flex gap-4 items-end mb-6">
@@ -1117,6 +1265,9 @@ export default function MismatchesPage() {
               expanded={expanded.has(supplier.supplier_id)}
               onToggle={() => toggleExpand(supplier.supplier_id)}
               onItemsResolved={handleItemsResolved}
+              orgId={orgId}
+              period={period}
+              locked={locked}
             />
           ))}
         </div>

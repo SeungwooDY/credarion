@@ -149,7 +149,8 @@ def test_approve_happy_path(client, db_session, supplier):
 
     db_session.refresh(r)
     assert r.status == "confirmed"
-    assert r.reviewer_id == "richard"
+    # Reviewer identity comes from the session, not the (deprecated) body field.
+    assert r.reviewer_id == "test-superuser@credarion.test"
     assert r.reviewed_at is not None
 
 
@@ -214,7 +215,8 @@ def test_reject_happy_path(client, db_session, supplier):
 
     db_session.refresh(r)
     assert r.status == "rejected"
-    assert r.reviewer_id == "richard"
+    # Reviewer identity comes from the session, not the (deprecated) body field.
+    assert r.reviewer_id == "test-superuser@credarion.test"
     assert r.reviewed_at is not None
     assert r.discrepancy_note == "qty does not match GRN"
 

@@ -54,6 +54,7 @@ export interface Me {
   email: string;
   full_name: string | null;
   is_superuser: boolean;
+  role: "admin" | "accountant";
   account: {
     id: string;
     name: string;
@@ -92,6 +93,12 @@ export function useCurrentOrg() {
     orgName: org?.name ?? "",
     orgLoading: meLoading,
   };
+}
+
+/** True when the current user may perform admin actions (sign-off, escalation review). */
+export function useIsAdmin(): boolean {
+  const { me } = useMe();
+  return me?.role === "admin" || !!me?.is_superuser;
 }
 
 export function useOrgs() {
@@ -281,6 +288,167 @@ export function useMismatches(orgId: string, period: string, includeMatches = fa
     mismatchesLoading: isLoading,
     mismatchesError: error,
     refreshMismatches: () => mutate(),
+  };
+}
+
+// ── Notifications ────────────────────────────────────────────
+
+export type NotificationType =
+  | "escalation_created"
+  | "escalation_acknowledged"
+  | "escalation_resolved"
+  | "period_signed_off"
+  | "period_reopened";
+
+export interface AppNotification {
+  id: string;
+  type: NotificationType;
+  payload: Record<string, string> | null;
+  escalation_id: string | null;
+  org_id: string | null;
+  period: string | null;
+  read_at: string | null;
+  created_at: string;
+}
+
+interface NotificationListPayload {
+  items: AppNotification[];
+  unread_count: number;
+}
+
+/** The bell's data source: latest notifications + unread count, polled every 30s. */
+export function useNotifications() {
+  const { data, error, isLoading, mutate } = useSWR<NotificationListPayload>(
+    "/notifications?limit=20",
+    fetcher,
+    { ...swrDefaults, refreshInterval: 30000 }
+  );
+
+  async function markRead(id: string) {
+    await fetch(`${API_BASE}/notifications/${id}/read`, {
+      method: "POST",
+      credentials: "include",
+    });
+    mutate();
+  }
+
+  async function markAllRead() {
+    await fetch(`${API_BASE}/notifications/read-all`, {
+      method: "POST",
+      credentials: "include",
+    });
+    mutate();
+  }
+
+  return {
+    notifications: data?.items ?? [],
+    unreadCount: data?.unread_count ?? 0,
+    notificationsLoading: isLoading,
+    notificationsError: error,
+    markRead,
+    markAllRead,
+    refreshNotifications: () => mutate(),
+  };
+}
+
+// ── Team management ──────────────────────────────────────────
+
+export interface TeamMember {
+  id: string;
+  email: string;
+  full_name: string | null;
+  role: "admin" | "accountant";
+  is_active: boolean;
+  is_superuser: boolean;
+  created_at: string;
+}
+
+/** Admin-only: the account's users. Non-admins get a 403 → key stays null via `enabled`. */
+export function useTeam(enabled: boolean) {
+  const { data, error, isLoading, mutate } = useSWR<TeamMember[]>(
+    enabled ? "/users" : null,
+    fetcher,
+    swrDefaults
+  );
+  return {
+    team: data ?? [],
+    teamLoading: isLoading,
+    teamError: error,
+    refreshTeam: () => mutate(),
+  };
+}
+
+// ── Period sign-off ──────────────────────────────────────────
+
+export interface SignoffStatus {
+  locked: boolean;
+  status: "signed_off" | "reopened" | null;
+  signed_off_by_name: string | null;
+  signed_off_at: string | null;
+  note: string | null;
+  reopened_by_name: string | null;
+  reopened_at: string | null;
+  reopen_note: string | null;
+}
+
+/** Sign-off/lock state for an org+period. `locked` gates mutating UI. */
+export function useSignoff(orgId: string, period: string) {
+  const key =
+    orgId && period ? `/signoffs?org_id=${orgId}&period=${period}` : null;
+  const { data, error, isLoading, mutate } = useSWR<SignoffStatus>(
+    key,
+    fetcher,
+    swrDefaults
+  );
+  return {
+    locked: data?.locked ?? false,
+    signoff: data ?? null,
+    signoffLoading: isLoading,
+    signoffError: error,
+    refreshSignoff: () => mutate(),
+  };
+}
+
+// ── Escalations ──────────────────────────────────────────────
+
+export interface EscalationItem {
+  id: string;
+  org_id: string;
+  supplier_id: string | null;
+  supplier_name: string | null;
+  result_id: string | null;
+  period: string;
+  title: string;
+  description: string | null;
+  status: "open" | "acknowledged" | "resolved";
+  raised_by_name: string | null;
+  acknowledged_by_name: string | null;
+  acknowledged_at: string | null;
+  resolved_by_name: string | null;
+  resolved_at: string | null;
+  resolution_note: string | null;
+  created_at: string;
+}
+
+export function useEscalations(
+  orgId: string,
+  filters?: { period?: string; status?: string }
+) {
+  const params = new URLSearchParams();
+  if (orgId) params.set("org_id", orgId);
+  if (filters?.period) params.set("period", filters.period);
+  if (filters?.status) params.set("status", filters.status);
+  const key = orgId ? `/escalations?${params.toString()}` : null;
+  const { data, error, isLoading, mutate } = useSWR<EscalationItem[]>(
+    key,
+    fetcher,
+    swrDefaults
+  );
+  return {
+    escalations: data ?? [],
+    escalationsLoading: isLoading,
+    escalationsError: error,
+    refreshEscalations: () => mutate(),
   };
 }
 

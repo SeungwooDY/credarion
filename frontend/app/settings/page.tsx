@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import PageHeader from "../components/page-header";
+import { PasswordSettings, TeamSettings } from "../components/team-settings";
 import { useCurrentOrg, useReconConfig } from "../lib/swr";
 import { CARD } from "@/app/lib/ui";
 import { useT } from "@/app/lib/i18n";
@@ -186,6 +187,12 @@ export default function SettingsPage() {
           )}
         </div>
       </div>
+
+      {/* Team management — admin only (component renders nothing otherwise) */}
+      <TeamSettings />
+
+      {/* Change password — all users */}
+      <PasswordSettings />
     </>
   );
 }

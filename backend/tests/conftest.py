@@ -31,6 +31,7 @@ def make_superuser() -> User:
         full_name="Test Superuser",
         is_active=True,
         is_superuser=True,
+        role="admin",
     )
     user.account = account
     return user

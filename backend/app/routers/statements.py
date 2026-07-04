@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.auth_deps import authorize_org, authorize_supplier, get_current_user
 from app.db import get_db
+from app.period_lock import ensure_supplier_period_unlocked
 from app.ingestion.cleaning import normalize_po_number
 from app.ingestion.column_mapping import try_alias_mapping
 from app.ingestion.header_detection import clean_header_cells, detect_header_row
@@ -221,6 +222,7 @@ async def upload_statement(
     Returns 201 on success, 202 if column mapping needs human review.
     """
     authorize_supplier(db, user, supplier_id)
+    ensure_supplier_period_unlocked(db, supplier_id, period)
     existing = _find_existing(supplier_id, period, db)
     if existing and not replace:
         raise HTTPException(
