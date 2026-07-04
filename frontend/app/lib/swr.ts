@@ -462,15 +462,14 @@ interface ReconConfig {
 }
 
 export function useReconConfig(orgId: string) {
-  const key = orgId ? `/reconciliation/config?org_id=${orgId}` : null;
-  const { data, error, isLoading, mutate } = useSWR<ReconConfig | null>(
+  // org_id is a PATH segment (matches the backend route /config/{org_id}).
+  // The endpoint returns defaults when no config row exists, so it never
+  // legitimately 404s — use the standard fetcher so real errors surface
+  // instead of being swallowed as "no config".
+  const key = orgId ? `/reconciliation/config/${orgId}` : null;
+  const { data, error, isLoading, mutate } = useSWR<ReconConfig>(
     key,
-    async (path: string) => {
-      const url = `${API_BASE}${path}`;
-      const res = await fetch(url);
-      if (!res.ok) return null;
-      return res.json();
-    },
+    fetcher,
     swrDefaults
   );
   return {

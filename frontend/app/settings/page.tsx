@@ -40,7 +40,8 @@ export default function SettingsPage() {
   async function saveConfig() {
     if (!formConfig || !orgId) return;
     try {
-      const res = await fetch(`/api/v1/reconciliation/config?org_id=${orgId}`, {
+      // org_id as a path segment — matches the backend route /config/{org_id}.
+      const res = await fetch(`/api/v1/reconciliation/config/${orgId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formConfig),
