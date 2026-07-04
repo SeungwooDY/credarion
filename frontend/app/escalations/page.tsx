@@ -10,6 +10,8 @@ import {
 } from "../lib/swr";
 import { CARD } from "@/app/lib/ui";
 import { useT } from "@/app/lib/i18n";
+import { currentPeriod, usePeriod } from "@/app/lib/period";
+import { PeriodBadge } from "@/app/components/period-switcher";
 
 const STATUS_STYLES: Record<EscalationItem["status"], string> = {
   open: "bg-red-50 text-red-700 border-red-200",
@@ -39,16 +41,16 @@ function fmtDate(iso: string | null): string {
 /** Free-form "Raise issue" modal (org+period+title+description). */
 function RaiseModal({
   orgId,
+  defaultPeriod,
   onClose,
   onRaised,
 }: {
   orgId: string;
+  defaultPeriod: string;
   onClose: () => void;
   onRaised: () => void;
 }) {
   const t = useT();
-  const now = new Date();
-  const defaultPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [period, setPeriod] = useState(defaultPeriod);
@@ -220,9 +222,15 @@ export default function EscalationsPage() {
   const { orgId } = useCurrentOrg();
   const isAdmin = useIsAdmin();
   const [statusFilter, setStatusFilter] = useState<string>("");
+  // Default to the globally selected month; "all" widens to every period.
+  const { period: globalPeriod } = usePeriod();
+  const [showAllPeriods, setShowAllPeriods] = useState(false);
   const { escalations, escalationsLoading, refreshEscalations } = useEscalations(
     orgId,
-    statusFilter ? { status: statusFilter } : undefined
+    {
+      ...(statusFilter ? { status: statusFilter } : {}),
+      ...(!showAllPeriods && globalPeriod ? { period: globalPeriod } : {}),
+    }
   );
   const [showRaise, setShowRaise] = useState(false);
   const [resolveTarget, setResolveTarget] = useState<EscalationItem | null>(null);
@@ -240,16 +248,34 @@ export default function EscalationsPage() {
       <PageHeader title={t("esc.title")} description={t("esc.subtitle")} />
 
       <div className="flex items-center justify-between gap-3">
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="border border-border rounded-lg px-3 py-1.5 text-sm bg-card focus:outline-none focus:ring-2 focus:ring-accent/20"
-        >
-          <option value="">{t("esc.filter.all")}</option>
-          <option value="open">{t("esc.status.open")}</option>
-          <option value="acknowledged">{t("esc.status.acknowledged")}</option>
-          <option value="resolved">{t("esc.status.resolved")}</option>
-        </select>
+        <div className="flex items-center gap-2">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="border border-border rounded-lg px-3 py-1.5 text-sm bg-card focus:outline-none focus:ring-2 focus:ring-accent/20"
+          >
+            <option value="">{t("esc.filter.all")}</option>
+            <option value="open">{t("esc.status.open")}</option>
+            <option value="acknowledged">{t("esc.status.acknowledged")}</option>
+            <option value="resolved">{t("esc.status.resolved")}</option>
+          </select>
+          {showAllPeriods ? (
+            <button
+              onClick={() => setShowAllPeriods(false)}
+              className="rounded-lg border border-border px-3 py-1.5 text-sm text-zinc-600 transition-colors hover:bg-muted"
+            >
+              {t("period.all_periods")}
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowAllPeriods(true)}
+              title={t("period.all_periods")}
+              className="transition-opacity hover:opacity-80"
+            >
+              <PeriodBadge />
+            </button>
+          )}
+        </div>
         <button
           onClick={() => setShowRaise(true)}
           className="px-3 py-1.5 text-sm rounded-lg bg-accent text-white hover:opacity-90 transition-opacity"
@@ -334,6 +360,7 @@ export default function EscalationsPage() {
       {showRaise && (
         <RaiseModal
           orgId={orgId}
+          defaultPeriod={globalPeriod || currentPeriod()}
           onClose={() => setShowRaise(false)}
           onRaised={refreshEscalations}
         />

@@ -209,11 +209,15 @@ export interface DashboardSupplier {
 
 /**
  * GET /api/v1/reconciliation/dashboard — full supplier overview for the
- * dashboard. Auto-selects the org + most recent period with data server-side.
+ * dashboard. Pass the globally selected period; when empty (first paint,
+ * nothing chosen yet) the backend auto-selects the latest period with data.
  */
-export function useSupplierOverview() {
+export function useSupplierOverview(period?: string) {
+  const key = period
+    ? `/reconciliation/dashboard?period=${period}`
+    : "/reconciliation/dashboard";
   const { data, error, isLoading, mutate } = useSWR<DashboardSupplier[]>(
-    "/reconciliation/dashboard",
+    key,
     fetcher,
     swrDefaults
   );
@@ -348,6 +352,30 @@ export function useNotifications() {
     markRead,
     markAllRead,
     refreshNotifications: () => mutate(),
+  };
+}
+
+// ── Accounting periods ───────────────────────────────────────
+
+export interface PeriodInfo {
+  period: string;
+  label: string;
+  has_data: boolean;
+  locked: boolean;
+}
+
+/** Distinct periods for the org (derived from data + current month), newest first. */
+export function usePeriods(orgId: string) {
+  const { data, error, isLoading, mutate } = useSWR<PeriodInfo[]>(
+    orgId ? `/periods?org_id=${orgId}` : null,
+    fetcher,
+    swrDefaults
+  );
+  return {
+    periods: data ?? [],
+    periodsLoading: isLoading,
+    periodsError: error,
+    refreshPeriods: () => mutate(),
   };
 }
 

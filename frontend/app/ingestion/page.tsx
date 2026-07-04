@@ -3,6 +3,8 @@
 import { useState } from "react";
 import PageHeader from "../components/page-header";
 import { useCurrentOrg } from "../lib/swr";
+import { usePeriod } from "../lib/period";
+import { PeriodBadge } from "../components/period-switcher";
 import { CARD } from "@/app/lib/ui";
 import { FileDropzone } from "@/components/ui/file-dropzone";
 import { useT } from "@/app/lib/i18n";
@@ -49,6 +51,7 @@ const FIELD_LABEL_KEYS: Record<string, string> = {
 export default function IngestionPage() {
   const t = useT();
   const { orgId } = useCurrentOrg();
+  const { period: globalPeriod } = usePeriod();
 
   const [grnFile, setGrnFile] = useState<File | null>(null);
   const [grnStatus, setGrnStatus] = useState("");
@@ -146,7 +149,9 @@ export default function IngestionPage() {
       }
       const data: PreviewData = await res.json();
       setPreview(data);
-      setSelectedPeriod(data.detected_period || "");
+      // Prefer the period detected from the file; fall back to the globally
+      // selected month so the field isn't empty when detection fails.
+      setSelectedPeriod(data.detected_period || globalPeriod || "");
       setStmtStep("preview");
     } catch (e) {
       setStmtError(`Error: ${e instanceof Error ? e.message : String(e)}`);
@@ -227,6 +232,11 @@ export default function IngestionPage() {
         title={t("ingestion.title")}
         description={t("ingestion.description")}
       />
+
+      {/* Active period (switch months from the sidebar) */}
+      <div className="mb-6">
+        <PeriodBadge />
+      </div>
 
       <div className="grid grid-cols-2 gap-6">
         {/* GRN Upload */}

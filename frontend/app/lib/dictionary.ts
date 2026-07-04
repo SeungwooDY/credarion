@@ -99,6 +99,15 @@ const en: Record<string, string> = {
   "esc.empty": "No escalations for this filter",
   "esc.escalated_ok": "Issue escalated — admins have been notified",
 
+  // ── global period switcher ──
+  "period.switcher_aria": "Accounting period",
+  "period.prev_month": "Previous month",
+  "period.next_month": "Next month",
+  "period.jump_to": "Jump to month",
+  "period.no_data": "no data",
+  "period.locked": "Signed off — locked",
+  "period.all_periods": "All periods",
+
   // ── team management ──
   "team.title": "Team",
   "team.subtitle": "People in your account and what they can do",
@@ -637,6 +646,15 @@ const zh: Record<string, string> = {
   "esc.supplier": "供应商",
   "esc.empty": "当前筛选条件下没有上报事项",
   "esc.escalated_ok": "问题已上报，管理员已收到通知",
+
+  // ── global period switcher ──
+  "period.switcher_aria": "会计期间",
+  "period.prev_month": "上个月",
+  "period.next_month": "下个月",
+  "period.jump_to": "跳转到月份",
+  "period.no_data": "无数据",
+  "period.locked": "已签核 — 已锁定",
+  "period.all_periods": "全部期间",
 
   // ── team management ──
   "team.title": "团队",

@@ -8,6 +8,7 @@ import { RoadmapCard, type RoadmapItem } from "@/components/ui/roadmap-card";
 import { CloseDatePicker } from "@/components/ui/close-date-picker";
 import { CARD } from "./lib/ui";
 import { useCloseDate } from "./lib/close-date";
+import { usePeriod } from "./lib/period";
 import { useT } from "./lib/i18n";
 import {
   useSupplierOverview,
@@ -149,8 +150,11 @@ function StatCard({
 
 export default function DashboardPage() {
   const t = useT();
+  // Globally selected period drives the overview; while "" (first paint,
+  // before the sidebar switcher initializes) the backend auto-selects.
+  const { period } = usePeriod();
   const { suppliers, suppliersLoading, suppliersError, refreshSuppliers } =
-    useSupplierOverview();
+    useSupplierOverview(period);
 
   // Month-end close date (user-configurable, persisted) + countdown.
   // Client-only to avoid hydration drift.

@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { LanguageToggle } from "@/components/ui/language-toggle";
 import NotificationBellContainer from "@/app/components/notification-bell-container";
+import PeriodSwitcher from "@/app/components/period-switcher";
 import { useT } from "@/app/lib/i18n";
 import { useMe } from "@/app/lib/swr";
 
@@ -159,6 +160,9 @@ export function SessionNavBar() {
                 </motion.li>
               </Link>
             </div>
+
+            {/* Global month switcher — the app's single period control */}
+            <PeriodSwitcher isCollapsed={isCollapsed} />
 
             <div className="flex h-full w-full flex-col">
               <div className="flex grow flex-col gap-4">

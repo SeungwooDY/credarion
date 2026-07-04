@@ -13,6 +13,7 @@ from app.routers import (
     invoices,
     notifications,
     orgs,
+    periods,
     reconciliation,
     signoffs,
     statements,
@@ -41,6 +42,7 @@ app.include_router(escalations.router, dependencies=_protected)
 app.include_router(signoffs.router, dependencies=_protected)
 app.include_router(notifications.router, dependencies=_protected)
 app.include_router(users.router, dependencies=_protected)
+app.include_router(periods.router, dependencies=_protected)
 
 
 @app.get("/health")

@@ -3,8 +3,9 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { AlertTriangle, CheckCircle2, Lock, LockOpen } from "lucide-react";
-import { MonthPicker } from "@/components/ui/month-picker";
+import { PeriodBadge } from "@/app/components/period-switcher";
 import { CARD } from "@/app/lib/ui";
+import { usePeriod } from "@/app/lib/period";
 import { useT } from "@/app/lib/i18n";
 import {
   useCurrentOrg,
@@ -14,23 +15,19 @@ import {
   useSuppliers,
 } from "@/app/lib/swr";
 
-function currentPeriod(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-}
-
 /**
- * Dashboard month-end sign-off card.
+ * Dashboard month-end sign-off card for the GLOBALLY selected period (the
+ * sidebar switcher is the single period control).
  *
- * Everyone sees the lock state for the picked period; only admins get the
- * Sign off / Reopen actions. Signing off locks the period (mutating endpoints
- * return 423 until an admin reopens).
+ * Everyone sees the lock state; only admins get the Sign off / Reopen
+ * actions. Signing off locks the period (mutating endpoints return 423
+ * until an admin reopens).
  */
 export default function SignoffCard() {
   const t = useT();
   const { orgId } = useCurrentOrg();
   const isAdmin = useIsAdmin();
-  const [period, setPeriod] = useState(currentPeriod());
+  const { period } = usePeriod();
   const { locked, signoff, refreshSignoff } = useSignoff(orgId, period);
   const [confirming, setConfirming] = useState<"sign" | "reopen" | null>(null);
   const [note, setNote] = useState("");
@@ -105,7 +102,7 @@ export default function SignoffCard() {
         </div>
 
         <div className="flex items-center gap-2">
-          <MonthPicker value={period} onChange={setPeriod} label={t("common.period")} />
+          <PeriodBadge />
           {locked ? (
             <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
               {t("signoff.signed_off")}
