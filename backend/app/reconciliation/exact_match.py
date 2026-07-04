@@ -46,8 +46,12 @@ class StatementItem:
 
 @dataclass
 class MatchResult:
-    erp: MatchCandidate
-    statement: StatementItem
+    # Either side may be None for group-constituent rows emitted by the
+    # aggregation layers (multi_delivery / aggregate): rows consolidated into a
+    # group whose counterpart is the group total, not a single line. 1:1 layers
+    # (exact/fuzzy/AI) always populate both sides.
+    erp: MatchCandidate | None
+    statement: StatementItem | None
     match_type: str
     quantity_delta: Decimal
     price_delta: Decimal

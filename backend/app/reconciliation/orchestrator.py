@@ -33,7 +33,7 @@ from app.reconciliation.exact_match import (
     run_exact_match,
 )
 from app.reconciliation.fuzzy_match import run_fuzzy_match
-from app.reconciliation.multi_po_dn import run_multi_po_dn_match
+from app.reconciliation.multi_delivery import run_multi_delivery_match
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +52,8 @@ def _split_by_balance(
     many more statement lines than ERP records (supplier records individual
     deliveries, ERP consolidates into fewer GRN receipts).
 
-    Balanced: stmt line count <= ERP record count for the PO+PN → 1:1 matching
-    Imbalanced: stmt line count > ERP record count → aggregate matching
+    Balanced: equal row counts on both sides for the PO+PN → 1:1 matching
+    Imbalanced: differing counts (either direction) → Layer 3 aggregation
     """
     # Group by PO+PN composite key
     erp_by_key: dict[tuple[str, str], list[MatchCandidate]] = defaultdict(list)
@@ -74,13 +74,18 @@ def _split_by_balance(
         elif po:
             stmt_by_key[(po, "")].append(s)
 
-    # Detect imbalanced PO+PN groups where statement has more lines than ERP
-    IMBALANCE_THRESHOLD = 1.4
+    # Detect count-imbalanced PO+PN groups in EITHER direction (statement more
+    # granular than ERP, or ERP more granular than statement — e.g. the same
+    # item received across several GRN dates vs one combined statement line).
+    # Any inequality routes the whole group to Layer 3's total-vs-total
+    # comparison; equal-count groups stay with 1:1 matching, where the
+    # closest-quantity tiebreaker is legitimate. One-sided keys stay "balanced"
+    # and reach Layer 3 anyway as L1/L2 leftovers.
     imbalanced_keys: set[tuple[str, str]] = set()
-    for key in stmt_by_key:
-        stmt_count = len(stmt_by_key[key])
+    for key in set(stmt_by_key) | set(erp_by_key):
+        stmt_count = len(stmt_by_key.get(key, []))
         erp_count = len(erp_by_key.get(key, []))
-        if erp_count > 0 and stmt_count > erp_count * IMBALANCE_THRESHOLD:
+        if erp_count > 0 and stmt_count > 0 and erp_count != stmt_count:
             imbalanced_keys.add(key)
 
     # Build sets of IDs to route to aggregate
@@ -162,12 +167,14 @@ REVIEW_UNMATCHED = "unmatched"
 
 # review match_type -> (confidence_score, confidence_label, sort_priority).
 # AI overrides the score with the model's own confidence (label/priority fixed).
-# Layer 2.5 "aggregate" and Layer 3 "multi_po_dn" share the "Aggregated Match"
-# bucket (sort_priority 4) per the review spec.
+# Layer 3 "multi_delivery", the L3.5 "aggregate" fallback, and the retired
+# "multi_po_dn" (kept so historical DB rows still classify) share the
+# "Aggregated Match" bucket (sort_priority 4) per the review spec.
 _REVIEW_META: dict[str, tuple[int, str, int]] = {
     "exact": (100, "Exact Match", 1),
     "near_exact": (92, "High Confidence — Small Discrepancy", 2),
     "fuzzy": (75, "Probable Match", 3),
+    "multi_delivery": (70, "Aggregated Match", 4),
     "aggregate": (70, "Aggregated Match", 4),
     "multi_po_dn": (70, "Aggregated Match", 4),
     "ai": (0, "AI Suggested — Careful Review", 5),
@@ -254,6 +261,21 @@ def _classify_review(match: MatchResult) -> dict[str, Any]:
         if not in_tolerance:
             score, label = 80, "High Confidence — Discrepancy"
 
+    # Aggregation-layer group discrepancy: totals across the (po, material)
+    # group disagree. Same priority bucket, lower score + explicit label; the
+    # group totals note gives the reviewer the aggregate picture directly.
+    if review_type in ("multi_delivery", "aggregate", "multi_po_dn") and match.discrepancy_type:
+        score, label = 60, "Aggregated Match — Discrepancy"
+        md = match.match_details or {}
+        if "erp_total_qty" in md:
+            note = (
+                f"Aggregate totals differ for {md.get('group_key', 'group')}: "
+                f"ERP qty {md.get('erp_total_qty')} vs statement qty {md.get('stmt_total_qty')}; "
+                f"ERP amount {md.get('erp_total_amt')} vs statement amount {md.get('stmt_total_amt')}."
+            )
+            if md.get("resolution_note"):
+                note += f" Note: {md['resolution_note']}."
+
     return {
         "match_type": review_type,
         "status": REVIEW_PENDING,
@@ -264,12 +286,57 @@ def _classify_review(match: MatchResult) -> dict[str, Any]:
     }
 
 
+def _compute_run_stats(all_results: list, total_statement: int | None) -> dict[str, Any]:
+    """Run-level stats from the emitted results. Pure function — unit-testable.
+
+    Counting rules (ADR-0001 amendments — prevent double counting):
+      - matched_count: DISTINCT statement lines that found a counterpart.
+        Aggregation groups can emit several result rows referencing the same
+        underlying pairing (or ERP-only constituent rows) — counting distinct
+        statement_line_ids keeps the number meaning "supplier lines verified".
+      - discrepancy_count: results carrying a discrepancy_type. Aggregation
+        layers set discrepancy_type ONLY on the group's primary row, so a
+        discrepant group counts once, not once per constituent row.
+      - auto_match_rate: statement-centric (matched stmt lines / total stmt
+        lines) with a defensive 100% cap — distinct counting makes >100%
+        impossible, the cap is a belt-and-braces invariant.
+    """
+    matched_stmt_ids = {
+        r.statement_line_id
+        for r in all_results
+        if r.match_type != "unmatched" and r.statement_line_id is not None
+    }
+    matched_count = len(matched_stmt_ids)
+    discrepancy_count = sum(1 for r in all_results if r.discrepancy_type is not None)
+    unmatched_count = sum(1 for r in all_results if r.match_type == "unmatched")
+    unmatched_erp_count = sum(
+        1 for r in all_results
+        if r.match_type == "unmatched" and r.discrepancy_type == "missing_from_statement"
+    )
+    if total_statement and total_statement > 0:
+        rate = min(Decimal("100"), Decimal(str(round(matched_count / total_statement * 100, 2))))
+    else:
+        rate = Decimal("0")
+    return {
+        "matched_count": matched_count,
+        "discrepancy_count": discrepancy_count,
+        "unmatched_count": unmatched_count,
+        "unmatched_erp_count": unmatched_erp_count,
+        "auto_match_rate": rate,
+    }
+
+
 def _line_amount(match: MatchResult) -> float:
     """Transaction amount used to sort the review queue (largest value first).
 
     Prefers the supplier statement amount, falling back to the ERP amount.
+    Either side may be None for aggregation-group constituent rows.
     """
-    amt = match.statement.amount if match.statement.amount is not None else match.erp.amount
+    amt = None
+    if match.statement is not None and match.statement.amount is not None:
+        amt = match.statement.amount
+    elif match.erp is not None:
+        amt = match.erp.amount
     return float(amt) if amt is not None else 0.0
 
 
@@ -285,8 +352,8 @@ def _match_to_result(
         run_id=run_id,
         supplier_id=supplier_id,
         period=period,
-        erp_record_id=match.erp.erp_id,
-        statement_line_id=match.statement.line_id,
+        erp_record_id=match.erp.erp_id if match.erp is not None else None,
+        statement_line_id=match.statement.line_id if match.statement is not None else None,
         match_type=review["match_type"],
         quantity_delta=match.quantity_delta,
         price_delta=match.price_delta,
@@ -502,37 +569,45 @@ async def run_reconciliation(
         for m in l2_matches:
             all_results.append(_match_to_result(m, run.id, supplier_id, period))
 
-        # Layer 2.5: Aggregate match — handles imbalanced PO groups plus
-        # any remaining unmatched from L1/L2
-        aggregate_erp = imbalanced_erp + unmatched_erp
-        aggregate_stmt = imbalanced_stmt + unmatched_stmt
+        # Layer 3: Multi-delivery aggregation (ADR-0001) — groups both sides by
+        # (po, material), compares summed totals with a qty-AND-amount gate, and
+        # emits real discrepancies. Runs BEFORE the always-matched aggregate
+        # fallback so it can never be masked. Input = imbalanced pre-split
+        # groups + everything L1/L2 left over.
+        l3_erp = imbalanced_erp + unmatched_erp
+        l3_stmt = imbalanced_stmt + unmatched_stmt
         logger.info(
-            "[RECON DEBUG] Layer 2.5 input: %d ERP (%d imbalanced + %d L2 leftover), "
+            "[RECON DEBUG] Layer 3 input: %d ERP (%d imbalanced + %d L2 leftover), "
             "%d stmt (%d imbalanced + %d L2 leftover)",
-            len(aggregate_erp), len(imbalanced_erp), len(unmatched_erp),
-            len(aggregate_stmt), len(imbalanced_stmt), len(unmatched_stmt),
+            len(l3_erp), len(imbalanced_erp), len(unmatched_erp),
+            len(l3_stmt), len(imbalanced_stmt), len(unmatched_stmt),
         )
-        l25_matches, unmatched_erp, unmatched_stmt = run_aggregate_match(
-            aggregate_erp, aggregate_stmt, qty_tol, price_tol
+        l3_matches, unmatched_erp, unmatched_stmt = run_multi_delivery_match(
+            l3_erp, l3_stmt, qty_tol, price_tol
         )
+        l3_matched = sum(1 for m in l3_matches if m.status == "matched")
+        l3_disc_groups = sum(1 for m in l3_matches if m.discrepancy_type is not None)
         logger.info(
-            "[RECON DEBUG] Layer 2.5 (aggregate): %d matches, "
-            "%d ERP unmatched, %d stmt unmatched",
-            len(l25_matches), len(unmatched_erp), len(unmatched_stmt),
+            "[RECON DEBUG] Layer 3 (multi_delivery): %d result rows "
+            "(%d matched rows, %d discrepancy groups), %d ERP unmatched, %d stmt unmatched",
+            len(l3_matches), l3_matched, l3_disc_groups,
+            len(unmatched_erp), len(unmatched_stmt),
         )
-        for m in l25_matches:
+        for m in l3_matches:
             all_results.append(_match_to_result(m, run.id, supplier_id, period))
 
-        # Layer 3: Multi-PO delivery note aggregation
-        l3_matches, unmatched_erp, unmatched_stmt = run_multi_po_dn_match(
+        # Layer 3.5: aggregate fallback — PO-level cross-material
+        # reconciliation on Layer 3's leftovers. Runs AFTER the
+        # discrepancy-aware Layer 3 so it cannot mask a group verdict.
+        l35_matches, unmatched_erp, unmatched_stmt = run_aggregate_match(
             unmatched_erp, unmatched_stmt, qty_tol, price_tol
         )
         logger.info(
-            "[RECON DEBUG] Layer 3 (DN aggregation): %d matches, "
+            "[RECON DEBUG] Layer 3.5 (aggregate fallback): %d matches, "
             "%d ERP unmatched, %d stmt unmatched",
-            len(l3_matches), len(unmatched_erp), len(unmatched_stmt),
+            len(l35_matches), len(unmatched_erp), len(unmatched_stmt),
         )
-        for m in l3_matches:
+        for m in l35_matches:
             all_results.append(_match_to_result(m, run.id, supplier_id, period))
 
         # Layer 4: AI match (if enabled)
@@ -606,11 +681,11 @@ async def run_reconciliation(
             "  Total results: %d\n"
             "  Unmatched ERP (missing from statement): %d\n"
             "  Unmatched stmt (missing from ERP): %d\n"
-            "  Layer breakdown: L1=%d, L2=%d, L2.5=%d, L3=%d, L4=%d",
+            "  Layer breakdown: L1=%d, L2=%d, L3=%d, L3.5=%d, L4=%d",
             len(all_results),
             len(unmatched_erp), len(unmatched_stmt),
-            len(l1_matches), len(l2_matches), len(l25_matches),
-            len(l3_matches),
+            len(l1_matches), len(l2_matches), len(l3_matches),
+            len(l35_matches),
             len(l4_matches),
         )
         if unmatched_erp:
@@ -623,40 +698,19 @@ async def run_reconciliation(
         # Bulk insert results
         db.add_all(all_results)
 
-        # Update run stats. Nothing auto-matches now, so "matched" means a pair
-        # was found and queued for review; "discrepancy" means that pair (or an
-        # unmatched leftover) carries a discrepancy_type worth flagging.
-        matched = sum(1 for r in all_results if r.match_type != "unmatched")
-        discrepancy = sum(1 for r in all_results if r.discrepancy_type is not None)
-        unmatched = sum(1 for r in all_results if r.match_type == "unmatched")
-
-        # Match rate is statement-centric: how well can we verify the supplier's
-        # claims against ERP? ERP-only items (not in statement) are informational
-        # and don't drag down the rate.
-        stmt_matched = sum(
-            1 for r in all_results
-            if r.match_type != "unmatched" and r.statement_line_id is not None
-        )
-        stmt_total = run.total_statement  # total statement line items
-        unmatched_erp_count = sum(
-            1 for r in all_results
-            if r.match_type == "unmatched" and r.discrepancy_type == "missing_from_statement"
-        )
-
-        run.matched_count = matched
-        run.discrepancy_count = discrepancy
-        run.unmatched_count = unmatched
-        run.auto_match_rate = (
-            Decimal(str(round(stmt_matched / stmt_total * 100, 2)))
-            if stmt_total and stmt_total > 0 else Decimal("0")
-        )
+        # Update run stats (see _compute_run_stats for the counting rules).
+        stats = _compute_run_stats(all_results, run.total_statement)
+        run.matched_count = stats["matched_count"]
+        run.discrepancy_count = stats["discrepancy_count"]
+        run.unmatched_count = stats["unmatched_count"]
+        run.auto_match_rate = stats["auto_match_rate"]
 
         logger.info(
             "[RECON DEBUG] Match rate: %d/%d statement items matched (%.1f%%). "
             "%d ERP items not in statement (informational).",
-            stmt_matched, stmt_total,
+            stats["matched_count"], run.total_statement or 0,
             float(run.auto_match_rate),
-            unmatched_erp_count,
+            stats["unmatched_erp_count"],
         )
         run.status = "completed"
         run.completed_at = datetime.utcnow()
