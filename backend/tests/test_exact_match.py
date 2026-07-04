@@ -132,7 +132,13 @@ class TestExactMatch:
         assert len(unmatched_stmt) == 1
 
     def test_duplicate_po_tiebreaker_by_date(self):
-        """When multiple ERP records share PO+PN, pick closest grn_date."""
+        """When multiple ERP records share PO+PN, pick closest grn_date.
+
+        Note: since ADR-0001, count-imbalanced PO+PN groups are routed to
+        Layer 3 aggregation before L1 runs, so through the orchestrator this
+        tiebreaker only fires for count-BALANCED groups. It remains a valid
+        unit test of run_exact_match itself.
+        """
         erp1 = _erp(erp_id=1, grn_date=datetime(2026, 3, 1))
         erp2 = _erp(erp_id=2, grn_date=datetime(2026, 3, 20))
         stmt = [_stmt(delivery_date=datetime(2026, 3, 18))]

@@ -33,16 +33,29 @@ def _emit_aggregate_matches(
     matched_erp_ids: set,
     matched_stmt_ids: set,
 ) -> list[MatchResult]:
-    """Pair ERP records with statement lines for reporting, mark all as matched."""
-    matches: list[MatchResult] = []
+    """Emit loss-free per-row results for one aggregate group.
 
+    ADR-0001 amendment (prevents double counting): rows pair 1:1 by closest
+    quantity up to min(len); leftover rows on the larger side get the OTHER
+    side = None with zero deltas — no row id ever appears in two results. The
+    GROUP-level deltas land exactly once, on the first ("primary") result, so
+    summing deltas over results equals the true group delta.
+
+    Known debt (deferred per ADR-0001): this fallback still marks every group
+    it accepts as "matched" and its caller gates on qty OR amount — Layer 3
+    (multi_delivery) runs first with an AND gate and real discrepancies, so
+    only PO-level cross-material groups reach here.
+    """
     erp_total_qty = sum(e.quantity for e in erp_group)
     erp_total_amt = sum(e.amount for e in erp_group)
     stmt_total_qty = sum(s.quantity for s in stmt_group)
     stmt_total_amt = sum(s.amount for s in stmt_group)
 
+    group_qty_delta = stmt_total_qty - erp_total_qty
+    group_amt_delta = stmt_total_amt - erp_total_amt
+
     base_details = {
-        "layer": "2.5",
+        "layer": "3.5",
         "match_type": "aggregate",
         "group_type": group_type,
         "group_key": group_key,
@@ -54,52 +67,51 @@ def _emit_aggregate_matches(
         "stmt_total_amt": str(stmt_total_amt),
     }
 
-    remaining_stmt = list(stmt_group)
-    for erp in erp_group:
-        if not remaining_stmt:
-            matches.append(MatchResult(
-                erp=erp,
-                statement=stmt_group[0],
-                match_type="aggregate",
-                quantity_delta=stmt_total_qty - erp_total_qty,
-                price_delta=Decimal("0"),
-                amount_delta=stmt_total_amt - erp_total_amt,
-                status="matched",
-                confidence=Decimal("0.85"),
-                match_details=base_details,
-            ))
-        else:
-            best_idx = min(
-                range(len(remaining_stmt)),
-                key=lambda i: abs(remaining_stmt[i].quantity - erp.quantity),
-            )
-            stmt = remaining_stmt.pop(best_idx)
-            matches.append(MatchResult(
-                erp=erp,
-                statement=stmt,
-                match_type="aggregate",
-                quantity_delta=stmt.quantity - erp.quantity,
-                price_delta=stmt.unit_price - erp.po_price,
-                amount_delta=stmt.amount - erp.amount,
-                status="matched",
-                confidence=Decimal("0.85"),
-                match_details=base_details,
-            ))
-        matched_erp_ids.add(erp.erp_id)
-
-    for stmt in remaining_stmt:
-        matches.append(MatchResult(
-            erp=erp_group[0],
+    def _result(
+        erp: MatchCandidate | None,
+        stmt: StatementItem | None,
+        *,
+        primary: bool,
+        extra: dict | None = None,
+    ) -> MatchResult:
+        return MatchResult(
+            erp=erp,
             statement=stmt,
             match_type="aggregate",
-            quantity_delta=stmt.quantity - erp_group[0].quantity,
+            quantity_delta=group_qty_delta if primary else Decimal("0"),
             price_delta=Decimal("0"),
-            amount_delta=Decimal("0"),
+            amount_delta=group_amt_delta if primary else Decimal("0"),
             status="matched",
             confidence=Decimal("0.85"),
-            match_details={**base_details, "note": "extra_statement_line_in_aggregate"},
-        ))
-        matched_stmt_ids.add(stmt.line_id)
+            match_details={
+                **base_details,
+                "role": "primary" if primary else "constituent",
+                **(extra or {}),
+            },
+        )
+
+    matches: list[MatchResult] = []
+    remaining_stmt = list(stmt_group)
+    pairs: list[tuple[MatchCandidate, StatementItem]] = []
+    for erp in erp_group:
+        if not remaining_stmt:
+            break
+        best_idx = min(
+            range(len(remaining_stmt)),
+            key=lambda i: abs(remaining_stmt[i].quantity - erp.quantity),
+        )
+        pairs.append((erp, remaining_stmt.pop(best_idx)))
+
+    for i, (erp, stmt) in enumerate(pairs):
+        matches.append(_result(erp, stmt, primary=(i == 0)))
+    for erp in erp_group[len(pairs):]:
+        matches.append(
+            _result(erp, None, primary=False, extra={"note": "erp_line_consolidated_in_aggregate"})
+        )
+    for stmt in remaining_stmt:
+        matches.append(
+            _result(None, stmt, primary=False, extra={"note": "extra_statement_line_in_aggregate"})
+        )
 
     for e in erp_group:
         matched_erp_ids.add(e.erp_id)
