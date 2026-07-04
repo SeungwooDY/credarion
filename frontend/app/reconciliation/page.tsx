@@ -8,7 +8,8 @@ import { CARD } from "@/app/lib/ui";
 import { useT, type TFunction } from "@/app/lib/i18n";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { MonthPicker } from "@/components/ui/month-picker";
+import { PeriodBadge } from "@/app/components/period-switcher";
+import { usePeriod } from "@/app/lib/period";
 
 interface RunResult {
   run: {
@@ -363,7 +364,9 @@ function SupplierRow({
 export default function ReconciliationPage() {
   const t = useT();
   const { orgId } = useCurrentOrg();
-  const [period, setPeriod] = useState("2026-03");
+  // Period comes from the global sidebar switcher; "" until it initializes
+  // (all period-keyed SWR hooks stay idle on empty period).
+  const { period } = usePeriod();
   const { suppliers, suppliersLoading, refreshSuppliers } = useSuppliers(orgId, period);
   const { locked, signoff, refreshSignoff } = useSignoff(orgId, period);
 
@@ -531,12 +534,9 @@ export default function ReconciliationPage() {
         </div>
       )}
 
-      {/* Controls */}
-      <div className="flex gap-4 items-end mb-6">
-        <div>
-          <label className="block text-xs font-medium text-zinc-500 mb-1.5">{t("common.period")}</label>
-          <MonthPicker value={period} onChange={setPeriod} label={t("common.period")} />
-        </div>
+      {/* Active period (switch months from the sidebar) */}
+      <div className="mb-6">
+        <PeriodBadge />
       </div>
 
       {/* Supplier readiness + breakdown table */}

@@ -8,7 +8,8 @@ import { useCurrentOrg, useMismatches, useSignoff } from "../lib/swr";
 import { RippleButton } from "@/components/ui/multi-type-ripple-buttons";
 import { CARD } from "@/app/lib/ui";
 import { useT, type TFunction } from "@/app/lib/i18n";
-import { MonthPicker } from "@/components/ui/month-picker";
+import { PeriodBadge } from "@/app/components/period-switcher";
+import { usePeriod } from "@/app/lib/period";
 
 interface SideRecord {
   po_number: string | null;
@@ -1080,7 +1081,9 @@ function SpreadsheetView({
 export default function MismatchesPage() {
   const t = useT();
   const { orgId } = useCurrentOrg();
-  const [period, setPeriod] = useState("2026-03");
+  // Period comes from the global sidebar switcher; "" until it initializes
+  // (all period-keyed SWR hooks stay idle on empty period).
+  const { period } = usePeriod();
   const [showMatches, setShowMatches] = useState(false);
   const { data, mismatchesLoading: loading, mismatchesError, refreshMismatches } = useMismatches(orgId, period, showMatches);
   const { locked, signoff } = useSignoff(orgId, period);
@@ -1140,10 +1143,8 @@ export default function MismatchesPage() {
 
       {/* Controls */}
       <div className="flex gap-4 items-end mb-6">
-        <div>
-          <label className="block text-xs font-medium mb-1">{t("common.period")}</label>
-          <MonthPicker value={period} onChange={setPeriod} label={t("common.period")} />
-        </div>
+        {/* Active period (switch months from the sidebar) */}
+        <PeriodBadge />
 
         {/* Show matches toggle — controls both the table view and what gets exported */}
         {!loading && (
