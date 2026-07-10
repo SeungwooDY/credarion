@@ -324,6 +324,6 @@ async def chat_ask(
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except anthropic.APIError as e:
             logger.error("Chat API error: %s", e)
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'content': 'The assistant is temporarily unavailable. Please try again.'})}\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")

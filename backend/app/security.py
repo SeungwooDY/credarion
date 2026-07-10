@@ -63,6 +63,13 @@ def hash_password(password: str) -> str:
     )
 
 
+# A valid scrypt hash of an unguessable value, computed once at import. The
+# login path verifies against this when no user matches, so an unknown email
+# costs the same scrypt work as a real one — closing the timing oracle that
+# would otherwise reveal which emails exist.
+DUMMY_PASSWORD_HASH = hash_password("credarion-login-timing-equalizer")
+
+
 def verify_password(password: str, stored: str) -> bool:
     """Constant-time verify a plaintext password against a stored scrypt hash."""
     try:

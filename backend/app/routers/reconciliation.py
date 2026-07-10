@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import logging
 import uuid
 from datetime import datetime
 
@@ -49,6 +50,8 @@ from app.reconciliation.schemas import (
 
 # Statuses that count as already-reviewed (cannot be re-approved/re-rejected).
 _REVIEWED_STATUSES = {"confirmed", "rejected"}
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/reconciliation", tags=["reconciliation"])
 
@@ -522,9 +525,14 @@ async def trigger_reconciliation(
     try:
         run = await run_reconciliation(body.supplier_id, body.period, db)
     except ValueError as e:
+        # Intentional, user-facing validation message (e.g. no ERP records).
         raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Reconciliation failed: {e}")
+    except Exception:
+        logger.exception(
+            "Reconciliation failed for supplier=%s period=%s",
+            body.supplier_id, body.period,
+        )
+        raise HTTPException(status_code=500, detail="Reconciliation failed")
 
     return ReconciliationRunResponse(run=_run_to_summary(run, db))
 

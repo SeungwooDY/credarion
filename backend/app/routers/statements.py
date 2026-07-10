@@ -1,6 +1,7 @@
 """API endpoints for supplier statement ingestion and column mapping management."""
 from __future__ import annotations
 
+import logging
 import re
 import shutil
 import tempfile
@@ -26,6 +27,8 @@ from app.models import (
     SupplierStatement,
     User,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/statements", tags=["statements"])
 
@@ -181,9 +184,11 @@ def preview_statement(
             po_overlap=po_overlap,
         )
     except ValueError as e:
+        # Intentional, user-facing validation message.
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse file: {e}")
+    except Exception:
+        logger.exception("Failed to parse uploaded statement file")
+        raise HTTPException(status_code=400, detail="Failed to parse the uploaded file")
 
 
 @router.get("/check")

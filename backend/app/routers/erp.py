@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import queue
 import shutil
 import tempfile
@@ -17,6 +18,8 @@ from app.auth_deps import authorize_org, get_current_user
 from app.db import SessionLocal, get_db
 from app.ingestion.grn_ingestor import GRNIngestionResult, ingest_grn
 from app.models import User
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/erp", tags=["erp"])
 
@@ -122,8 +125,13 @@ def upload_grn_stream(
                 "suppliers_existing": result.suppliers_existing,
                 "errors": result.errors,
             })
-        except Exception as e:
-            progress_queue.put({"type": "result", "status": "error", "errors": [str(e)]})
+        except Exception:
+            logger.exception("GRN ingestion failed for org=%s", org_id)
+            progress_queue.put({
+                "type": "result",
+                "status": "error",
+                "errors": ["Ingestion failed while processing the uploaded file"],
+            })
         finally:
             db.close()
             progress_queue.put(None)  # sentinel
