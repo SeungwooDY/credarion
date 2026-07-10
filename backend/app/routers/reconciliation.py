@@ -10,7 +10,11 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
-from app.auth_deps import authorize_supplier, get_current_user
+from app.auth_deps import (
+    accessible_supplier_ids,
+    authorize_supplier,
+    get_current_user,
+)
 from app.db import get_db
 from app.period_lock import (
     ensure_result_period_unlocked,
@@ -533,9 +537,13 @@ def list_runs(
     limit: int = Query(default=20, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> list[RunSummary]:
     """List reconciliation runs with optional filters."""
     q = db.query(ReconciliationRun)
+    allowed = accessible_supplier_ids(db, user)
+    if allowed is not None:
+        q = q.filter(ReconciliationRun.supplier_id.in_(allowed))
     if supplier_id:
         q = q.filter(ReconciliationRun.supplier_id == supplier_id)
     if period:
@@ -550,11 +558,13 @@ def list_runs(
 def get_run(
     run_id: uuid.UUID,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> RunSummary:
     """Get run detail with summary stats."""
     run = db.query(ReconciliationRun).filter(ReconciliationRun.id == run_id).first()
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
+    authorize_supplier(db, user, run.supplier_id)
     return _run_to_summary(run, db)
 
 
@@ -567,9 +577,13 @@ def list_results(
     limit: int = Query(default=50, le=200),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> list[ResultDetail]:
     """List reconciliation results with filters and pagination."""
     q = db.query(ReconciliationResult)
+    allowed = accessible_supplier_ids(db, user)
+    if allowed is not None:
+        q = q.filter(ReconciliationResult.supplier_id.in_(allowed))
     if run_id:
         q = q.filter(ReconciliationResult.run_id == run_id)
     if status:
@@ -586,11 +600,13 @@ def list_results(
 def get_result(
     result_id: uuid.UUID,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> ResultDetail:
     """Get a single reconciliation result."""
     r = db.query(ReconciliationResult).filter(ReconciliationResult.id == result_id).first()
     if not r:
         raise HTTPException(status_code=404, detail="Result not found")
+    authorize_supplier(db, user, r.supplier_id)
     return _result_to_detail(r)
 
 
@@ -605,6 +621,7 @@ def resolve_result(
     r = db.query(ReconciliationResult).filter(ReconciliationResult.id == result_id).first()
     if not r:
         raise HTTPException(status_code=404, detail="Result not found")
+    authorize_supplier(db, user, r.supplier_id)
     ensure_result_period_unlocked(db, r)
     if r.status == "resolved":
         raise HTTPException(status_code=400, detail="Already resolved")
@@ -625,11 +642,14 @@ def bulk_resolve(
     user: User = Depends(get_current_user),
 ) -> list[ResultDetail]:
     """Bulk resolve multiple results. Resolver identity comes from the session."""
-    results = (
-        db.query(ReconciliationResult)
-        .filter(ReconciliationResult.id.in_(body.result_ids))
-        .all()
+    q = db.query(ReconciliationResult).filter(
+        ReconciliationResult.id.in_(body.result_ids)
     )
+    allowed = accessible_supplier_ids(db, user)
+    if allowed is not None:
+        q = q.filter(ReconciliationResult.supplier_id.in_(allowed))
+    results = q.all()
+    # A cross-tenant id filtered out above surfaces here as a count mismatch.
     if len(results) != len(body.result_ids):
         raise HTTPException(status_code=404, detail="Some results not found")
 
@@ -659,9 +679,14 @@ def bulk_resolve(
 @router.get("/summary", response_model=list[SupplierReconciliationSummary])
 def reconciliation_summary(
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> list[SupplierReconciliationSummary]:
     """Get reconciliation status per supplier for the UI dashboard."""
-    suppliers = db.query(Supplier).all()
+    sq = db.query(Supplier)
+    allowed = accessible_supplier_ids(db, user)
+    if allowed is not None:
+        sq = sq.filter(Supplier.id.in_(allowed))
+    suppliers = sq.all()
     summaries = []
     for s in suppliers:
         latest_run = (
@@ -698,6 +723,7 @@ def export_results(
     period: str | None = None,
     format: str = Query(default="csv", pattern="^(csv|xlsx)$"),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> StreamingResponse:
     """Download discrepancy report as Excel or CSV."""
     import pandas as pd
@@ -707,6 +733,9 @@ def export_results(
     q = db.query(ReconciliationResult).filter(
         ReconciliationResult.discrepancy_type.isnot(None)
     )
+    allowed = accessible_supplier_ids(db, user)
+    if allowed is not None:
+        q = q.filter(ReconciliationResult.supplier_id.in_(allowed))
     if run_id:
         q = q.filter(ReconciliationResult.run_id == run_id)
     if supplier_id:
@@ -999,6 +1028,7 @@ def approve_result(
     r = db.query(ReconciliationResult).filter(ReconciliationResult.id == result_id).first()
     if not r:
         raise HTTPException(status_code=404, detail="Result not found")
+    authorize_supplier(db, user, r.supplier_id)
     ensure_result_period_unlocked(db, r)
     if r.status in _REVIEWED_STATUSES:
         raise HTTPException(
@@ -1034,6 +1064,7 @@ def reject_result(
     r = db.query(ReconciliationResult).filter(ReconciliationResult.id == result_id).first()
     if not r:
         raise HTTPException(status_code=404, detail="Result not found")
+    authorize_supplier(db, user, r.supplier_id)
     ensure_result_period_unlocked(db, r)
     if r.status in _REVIEWED_STATUSES:
         raise HTTPException(
@@ -1053,12 +1084,14 @@ def review_queue(
     supplier_id: uuid.UUID,
     period: str,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> list[ResultDetail]:
     """Human review queue for a supplier+period (latest run).
 
     Sorted by sort_priority ASC (highest confidence first), then amount DESC
     (largest value items first) within each confidence group.
     """
+    authorize_supplier(db, user, supplier_id)
     latest_run = (
         db.query(ReconciliationRun)
         .filter(

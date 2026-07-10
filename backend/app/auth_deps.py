@@ -112,6 +112,39 @@ def authorize_supplier(
     authorize_org(db, user, supplier.org_id)
 
 
+def accessible_org_ids(db: Session, user: User) -> set[uuid.UUID] | None:
+    """Org IDs owned by the user's account.
+
+    Returns ``None`` for superusers, meaning "unrestricted" — callers should
+    skip filtering entirely in that case rather than treat it as an empty set.
+    """
+    if user.is_superuser:
+        return None
+    rows = (
+        db.query(Organization.id)
+        .filter(Organization.account_id == user.account_id)
+        .all()
+    )
+    return {row[0] for row in rows}
+
+
+def accessible_supplier_ids(db: Session, user: User) -> set[uuid.UUID] | None:
+    """Supplier IDs the user's account may access (via its orgs).
+
+    Returns ``None`` for superusers, meaning "unrestricted" (see
+    :func:`accessible_org_ids`).
+    """
+    if user.is_superuser:
+        return None
+    rows = (
+        db.query(Supplier.id)
+        .join(Organization, Supplier.org_id == Organization.id)
+        .filter(Organization.account_id == user.account_id)
+        .all()
+    )
+    return {row[0] for row in rows}
+
+
 def enforce_org_scope(
     request: Request,
     user: User = Depends(get_current_user),

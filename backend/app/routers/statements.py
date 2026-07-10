@@ -280,6 +280,7 @@ def update_mapping(
     mapping_id: uuid.UUID,
     body: ColumnMappingUpdate,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> ColumnMappingResponse:
     """Manually confirm or update a column mapping (Tier 3 human review)."""
     mapping = (
@@ -289,6 +290,7 @@ def update_mapping(
     )
     if not mapping:
         raise HTTPException(status_code=404, detail="Mapping not found")
+    authorize_supplier(db, user, mapping.supplier_id)
 
     mapping.column_map = body.column_map
     mapping.source = "manual"
@@ -304,8 +306,10 @@ def update_mapping(
 def get_mapping(
     supplier_id: uuid.UUID,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> ColumnMappingResponse:
     """Get the current column mapping for a supplier."""
+    authorize_supplier(db, user, supplier_id)
     mapping = (
         db.query(SupplierColumnMapping)
         .filter(SupplierColumnMapping.supplier_id == supplier_id)
