@@ -886,6 +886,9 @@ def list_mismatches(
             "amount_delta": float(r.amount_delta) if r.amount_delta is not None else None,
             "confidence": float(r.confidence) if r.confidence is not None else None,
             "resolution_note": r.resolution_note,
+            # Aggregation-group context (layer 3/3.5): role, group_key, line
+            # counts and group totals — lets the UI explain group-level deltas.
+            "match_details": r.match_details,
             "erp": {
                 "po_number": erp.po_number,
                 "material_number": erp.material_number,

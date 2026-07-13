@@ -26,8 +26,11 @@ Emission contract (ADR-0001 amendment — prevents double counting):
   - Leftover rows on the larger side are emitted with the OTHER SIDE = None and
     zero deltas ("constituent" rows) — no row id ever appears in two results.
   - The GROUP-level deltas and discrepancy_type are recorded exactly once, on
-    the first ("primary") result, so summing deltas over results equals the true
-    group delta and the dashboard's money-at-risk counts each group once.
+    the "primary" result, so summing deltas over results equals the true group
+    delta and the dashboard's money-at-risk counts each group once. The primary
+    is the row that embodies the imbalance: the first leftover line on the
+    surplus side (e.g. the extra statement line the ERP never received),
+    falling back to the first paired row when no such leftover exists.
   - match_details on every row carries the group context (key, totals, counts).
 
 Groups that exist on only one side are returned as unmatched, so the downstream
@@ -127,7 +130,9 @@ def _emit_group(
 
     Pairs rows 1:1 by closest quantity up to min(len) for traceability; leftover
     rows on the larger side get counterpart=None with zero deltas. The group
-    deltas + discrepancy_type land exactly once, on the primary (first) result.
+    deltas + discrepancy_type land exactly once, on the primary result — the
+    first leftover row on the surplus side when the delta points at one (so the
+    verdict sits on the line that caused it), else the first paired row.
     Invariant: no erp_id / line_id appears in more than one result.
     """
     status, disc_type, resolution_note, qty_delta, price_delta, amount_delta = (
@@ -185,7 +190,6 @@ def _emit_group(
         )
 
     # 1:1 pairing by closest quantity, up to min(len) — traceability only.
-    matches: list[MatchResult] = []
     remaining = list(stmt_group)
     pairs: list[tuple[MatchCandidate, StatementItem]] = []
     for erp in erp_group:
@@ -196,19 +200,36 @@ def _emit_group(
             key=lambda i: abs(_num(remaining[i].quantity) - _num(erp.quantity)),
         )
         pairs.append((erp, remaining.pop(idx)))
+    erp_leftovers = erp_group[len(pairs):]
+    stmt_leftovers = remaining
 
-    for i, (erp, stmt) in enumerate(pairs):
-        matches.append(_result(erp, stmt, primary=(i == 0)))
-    # Leftovers (larger side) — counterpart None, zero deltas, group context.
-    for erp in erp_group[len(pairs):]:
-        matches.append(
-            _result(erp, None, primary=False, extra={"note": "erp_line_consolidated_in_group"})
-        )
-    for stmt in remaining:
-        matches.append(
-            _result(None, stmt, primary=False, extra={"note": "statement_line_consolidated_in_group"})
-        )
-    return matches
+    entries: list[tuple[MatchCandidate | None, StatementItem | None, dict | None]] = [
+        (erp, stmt, None) for erp, stmt in pairs
+    ]
+    entries += [
+        (erp, None, {"note": "erp_line_consolidated_in_group"}) for erp in erp_leftovers
+    ]
+    entries += [
+        (None, stmt, {"note": "statement_line_consolidated_in_group"})
+        for stmt in stmt_leftovers
+    ]
+
+    # The group verdict lands on the row that embodies the imbalance: the first
+    # leftover line on the surplus side (positive delta = statement claims
+    # more, so the extra statement line; negative = the extra ERP receipt).
+    # Falls back to the first paired row when the delta has no leftover to
+    # point at (equal line counts, quantities drifting across pairs).
+    primary_idx = 0
+    direction = qty_delta or amount_delta
+    if direction > 0 and stmt_leftovers:
+        primary_idx = len(pairs) + len(erp_leftovers)
+    elif direction < 0 and erp_leftovers:
+        primary_idx = len(pairs)
+
+    return [
+        _result(erp, stmt, primary=(i == primary_idx), extra=extra)
+        for i, (erp, stmt, extra) in enumerate(entries)
+    ]
 
 
 def run_multi_delivery_match(

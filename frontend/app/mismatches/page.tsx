@@ -22,6 +22,18 @@ interface SideRecord {
   delivery_date?: string | null;
 }
 
+interface GroupDetails {
+  role?: string;
+  note?: string;
+  group_key?: string;
+  erp_lines?: number;
+  stmt_lines?: number;
+  erp_total_qty?: string;
+  stmt_total_qty?: string;
+  erp_total_amt?: string;
+  stmt_total_amt?: string;
+}
+
 interface MismatchItem {
   id: string;
   match_type: string;
@@ -32,6 +44,7 @@ interface MismatchItem {
   amount_delta: number | null;
   confidence: number | null;
   resolution_note: string | null;
+  match_details?: GroupDetails | null;
   erp: SideRecord | null;
   statement: SideRecord | null;
 }
@@ -582,6 +595,9 @@ function SupplierCard({
                   const po = item.erp?.po_number || item.statement?.po_number || "-";
                   const pn = item.erp?.material_number || item.statement?.material_number || "-";
                   const isMatch = !item.discrepancy_type;
+                  const md = item.match_details;
+                  const isGrouped =
+                    !!md?.group_key && ((md.erp_lines ?? 0) > 1 || (md.stmt_lines ?? 0) > 1);
                   const isUnmatched = item.match_type === "unmatched";
                   const isResolved = item.status === "resolved";
                   const rowBg = isMatch
@@ -615,6 +631,22 @@ function SupplierCard({
                           </span>
                         ) : (
                           <DiscrepancyLabel type={item.discrepancy_type} />
+                        )}
+                        {isGrouped && (
+                          <span
+                            className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium text-zinc-500 bg-zinc-100 border border-zinc-200 cursor-help align-middle"
+                            title={t("mismatches.group_tooltip", {
+                              erpLines: md?.erp_lines ?? 0,
+                              stmtLines: md?.stmt_lines ?? 0,
+                              erpQty: md?.erp_total_qty ?? "-",
+                              stmtQty: md?.stmt_total_qty ?? "-",
+                            })}
+                          >
+                            {t("mismatches.group_badge", {
+                              erpLines: md?.erp_lines ?? 0,
+                              stmtLines: md?.stmt_lines ?? 0,
+                            })}
+                          </span>
                         )}
                       </td>
                       <td className="px-3 py-2 font-mono whitespace-nowrap">{po}</td>
