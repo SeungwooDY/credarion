@@ -9,7 +9,12 @@ from app.auth_deps import get_current_user
 from app.config import settings
 from app.db import get_db
 from app.models import Organization, User
-from app.security import create_access_token, hash_password, verify_password
+from app.security import (
+    DUMMY_PASSWORD_HASH,
+    create_access_token,
+    hash_password,
+    verify_password,
+)
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
@@ -94,7 +99,12 @@ def login(body: LoginRequest, response: Response, db: Session = Depends(get_db))
     email = body.email.strip().lower()
     user = db.query(User).filter(User.email == email).first()
 
-    if user is None or not user.is_active or not verify_password(body.password, user.hashed_password):
+    # Always run a scrypt verify — against a dummy hash when the email is
+    # unknown — so response time doesn't reveal whether the email exists.
+    stored_hash = user.hashed_password if user is not None else DUMMY_PASSWORD_HASH
+    password_ok = verify_password(body.password, stored_hash)
+
+    if user is None or not user.is_active or not password_ok:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",

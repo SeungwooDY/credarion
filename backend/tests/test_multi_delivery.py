@@ -249,6 +249,68 @@ class TestMultiDeliveryAggregation:
         assert any(m.quantity_delta != Decimal("0") for m in matches), \
             "real quantity gap was masked as zero"
 
+    def test_group_verdict_lands_on_extra_statement_line(self):
+        """SDD201 regression: supplier claims a delivery the ERP never received.
+
+        ERP has one 2630-unit receipt; the statement has the same 2630 line PLUS
+        an extra 51370-unit line. The quantity_over verdict and the +51370 delta
+        must land on the extra statement line (erp=None), NOT on the paired row
+        whose own quantities match — otherwise the review UI shows a row with
+        equal quantities carrying a huge delta while the culprit reads 'matched'.
+        """
+        erp = [_erp(erp_id=1, qty="2630", price="0.1323", amount="347.95")]
+        stmt = [
+            _stmt(line_id=1, qty="2630", price="0.1323", amount="347.95"),
+            _stmt(line_id=2, qty="51370", price="0.1323", amount="6796.25"),
+        ]
+
+        matches, _, _ = run_multi_delivery_match(erp, stmt)
+
+        primary = [m for m in matches if m.discrepancy_type is not None]
+        assert len(primary) == 1
+        p = primary[0]
+        assert p.discrepancy_type == "quantity_over"
+        assert p.erp is None and p.statement.line_id == 2
+        assert p.quantity_delta == Decimal("51370")
+        # The paired 2630/2630 row is a plain constituent with zero deltas.
+        paired = next(m for m in matches if m.erp is not None)
+        assert paired.statement.line_id == 1
+        assert paired.quantity_delta == Decimal("0")
+        assert paired.discrepancy_type is None
+
+    def test_group_verdict_lands_on_extra_erp_line(self):
+        """Mirror case: ERP received more than the supplier claims (quantity_under).
+
+        The verdict and negative delta land on the leftover ERP receipt.
+        """
+        erp = [
+            _erp(erp_id=1, qty="1000"),
+            _erp(erp_id=2, qty="400"),
+        ]
+        stmt = [_stmt(line_id=1, qty="1000")]
+
+        matches, _, _ = run_multi_delivery_match(erp, stmt)
+
+        primary = [m for m in matches if m.discrepancy_type is not None]
+        assert len(primary) == 1
+        p = primary[0]
+        assert p.discrepancy_type == "quantity_under"
+        assert p.statement is None and p.erp.erp_id == 2
+        assert p.quantity_delta == Decimal("-400")
+
+    def test_group_verdict_falls_back_to_first_pair_without_leftovers(self):
+        """Equal line counts but drifting quantities: delta stays on the first pair."""
+        erp = [_erp(erp_id=1, qty="600"), _erp(erp_id=2, qty="400")]
+        stmt = [_stmt(line_id=1, qty="700"), _stmt(line_id=2, qty="400")]
+
+        matches, _, _ = run_multi_delivery_match(erp, stmt)
+
+        primary = [m for m in matches if m.discrepancy_type is not None]
+        assert len(primary) == 1
+        p = primary[0]
+        assert p.erp is not None and p.statement is not None
+        assert p.quantity_delta == Decimal("100")
+
     def test_match_details_carry_aggregate_totals(self):
         """A matched group records its aggregate totals for the review UI."""
         erp = [_erp(erp_id=1, qty="300"), _erp(erp_id=2, qty="700")]

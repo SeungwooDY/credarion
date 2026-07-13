@@ -126,6 +126,29 @@ def test_login_unknown_email_rejected(client, db_session):
     assert resp.status_code == 401
 
 
+def test_login_runs_verify_even_for_unknown_email(client, db_session, monkeypatch):
+    """Timing-oracle guard: a scrypt verify must run on the miss path so an
+    unknown email costs the same as a real one (see DUMMY_PASSWORD_HASH)."""
+    import app.routers.auth as auth_mod
+
+    calls: list[str] = []
+    real_verify = auth_mod.verify_password
+
+    def _spy(password: str, stored: str) -> bool:
+        calls.append(stored)
+        return real_verify(password, stored)
+
+    monkeypatch.setattr(auth_mod, "verify_password", _spy)
+
+    resp = client.post(
+        "/api/v1/auth/login",
+        json={"email": "nobody@credarion.test", "password": "whatever"},
+    )
+    assert resp.status_code == 401
+    # Verify was invoked, and against the dummy hash (not skipped).
+    assert calls == [auth_mod.DUMMY_PASSWORD_HASH]
+
+
 def test_login_blocked_for_non_paying_account(client, db_session):
     _make_user(db_session, email="canceled@credarion.test", status="canceled")
     resp = client.post(

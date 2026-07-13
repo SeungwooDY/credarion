@@ -1,6 +1,7 @@
 """API endpoints for supplier statement ingestion and column mapping management."""
 from __future__ import annotations
 
+import logging
 import re
 import shutil
 import tempfile
@@ -26,6 +27,8 @@ from app.models import (
     SupplierStatement,
     User,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/statements", tags=["statements"])
 
@@ -181,9 +184,11 @@ def preview_statement(
             po_overlap=po_overlap,
         )
     except ValueError as e:
+        # Intentional, user-facing validation message.
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to parse file: {e}")
+    except Exception:
+        logger.exception("Failed to parse uploaded statement file")
+        raise HTTPException(status_code=400, detail="Failed to parse the uploaded file")
 
 
 @router.get("/check")
@@ -280,6 +285,7 @@ def update_mapping(
     mapping_id: uuid.UUID,
     body: ColumnMappingUpdate,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> ColumnMappingResponse:
     """Manually confirm or update a column mapping (Tier 3 human review)."""
     mapping = (
@@ -289,6 +295,7 @@ def update_mapping(
     )
     if not mapping:
         raise HTTPException(status_code=404, detail="Mapping not found")
+    authorize_supplier(db, user, mapping.supplier_id)
 
     mapping.column_map = body.column_map
     mapping.source = "manual"
@@ -304,8 +311,10 @@ def update_mapping(
 def get_mapping(
     supplier_id: uuid.UUID,
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> ColumnMappingResponse:
     """Get the current column mapping for a supplier."""
+    authorize_supplier(db, user, supplier_id)
     mapping = (
         db.query(SupplierColumnMapping)
         .filter(SupplierColumnMapping.supplier_id == supplier_id)

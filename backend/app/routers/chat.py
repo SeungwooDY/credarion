@@ -76,14 +76,23 @@ def _decimal(v: Decimal | None) -> float | None:
     return float(v) if v is not None else None
 
 
-def _load_db_context(org_id: str | None) -> str:
-    """Query the database and build a context string for the LLM."""
+def _load_db_context(
+    org_id: str | None, account_id: uuid.UUID, is_superuser: bool
+) -> str:
+    """Query the database and build a context string for the LLM.
+
+    Scoped to ``account_id`` so the assistant never sees another tenant's data;
+    superusers (platform staff) see everything, matching the rest of the app.
+    """
     parts: list[str] = []
 
     db = SessionLocal()
     try:
-        # ── Organizations ──
-        orgs = db.query(Organization).all()
+        # ── Organizations (scoped to the caller's account) ──
+        orgs_q = db.query(Organization)
+        if not is_superuser:
+            orgs_q = orgs_q.filter(Organization.account_id == account_id)
+        orgs = orgs_q.all()
         if not orgs:
             parts.append("No organizations in the system yet. The user needs to create one first.")
             return "\n".join(parts)
@@ -92,12 +101,13 @@ def _load_db_context(org_id: str | None) -> str:
         for o in orgs:
             parts.append(f"  - {o.name} (currency: {o.reporting_currency}, id: {o.id})")
 
-        # Pick the active org
+        # Pick the active org — constrained to the same account scope, so a
+        # foreign org_id can never select another tenant's data.
         active_org = None
         if org_id:
             try:
                 uid = uuid.UUID(org_id)
-                active_org = db.query(Organization).filter(Organization.id == uid).first()
+                active_org = next((o for o in orgs if o.id == uid), None)
             except ValueError:
                 pass
         if not active_org:
@@ -287,7 +297,7 @@ async def chat_ask(
         raise HTTPException(status_code=503, detail="Anthropic API key not configured")
 
     authorize_org(db, user, req.org_id)
-    context_block = _load_db_context(req.org_id)
+    context_block = _load_db_context(req.org_id, user.account_id, user.is_superuser)
 
     messages: list[dict] = []
     for msg in req.history[-20:]:
@@ -314,6 +324,6 @@ async def chat_ask(
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except anthropic.APIError as e:
             logger.error("Chat API error: %s", e)
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'content': 'The assistant is temporarily unavailable. Please try again.'})}\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")

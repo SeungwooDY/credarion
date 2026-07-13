@@ -38,8 +38,10 @@ def _emit_aggregate_matches(
     ADR-0001 amendment (prevents double counting): rows pair 1:1 by closest
     quantity up to min(len); leftover rows on the larger side get the OTHER
     side = None with zero deltas — no row id ever appears in two results. The
-    GROUP-level deltas land exactly once, on the first ("primary") result, so
-    summing deltas over results equals the true group delta.
+    GROUP-level deltas land exactly once, on the "primary" result — the first
+    leftover row on the surplus side when the delta points at one, else the
+    first paired row — so summing deltas over results equals the true group
+    delta.
 
     Known debt (deferred per ADR-0001): this fallback still marks every group
     it accepts as "matched" and its caller gates on qty OR amount — Layer 3
@@ -90,7 +92,6 @@ def _emit_aggregate_matches(
             },
         )
 
-    matches: list[MatchResult] = []
     remaining_stmt = list(stmt_group)
     pairs: list[tuple[MatchCandidate, StatementItem]] = []
     for erp in erp_group:
@@ -101,17 +102,35 @@ def _emit_aggregate_matches(
             key=lambda i: abs(remaining_stmt[i].quantity - erp.quantity),
         )
         pairs.append((erp, remaining_stmt.pop(best_idx)))
+    erp_leftovers = erp_group[len(pairs):]
+    stmt_leftovers = remaining_stmt
 
-    for i, (erp, stmt) in enumerate(pairs):
-        matches.append(_result(erp, stmt, primary=(i == 0)))
-    for erp in erp_group[len(pairs):]:
-        matches.append(
-            _result(erp, None, primary=False, extra={"note": "erp_line_consolidated_in_aggregate"})
-        )
-    for stmt in remaining_stmt:
-        matches.append(
-            _result(None, stmt, primary=False, extra={"note": "extra_statement_line_in_aggregate"})
-        )
+    entries: list[tuple[MatchCandidate | None, StatementItem | None, dict | None]] = [
+        (erp, stmt, None) for erp, stmt in pairs
+    ]
+    entries += [
+        (erp, None, {"note": "erp_line_consolidated_in_aggregate"})
+        for erp in erp_leftovers
+    ]
+    entries += [
+        (None, stmt, {"note": "extra_statement_line_in_aggregate"})
+        for stmt in stmt_leftovers
+    ]
+
+    # Group deltas land on the leftover line on the surplus side when the
+    # delta points at one (so the number sits beside the line that caused it),
+    # else on the first paired row.
+    primary_idx = 0
+    direction = group_qty_delta or group_amt_delta
+    if direction > 0 and stmt_leftovers:
+        primary_idx = len(pairs) + len(erp_leftovers)
+    elif direction < 0 and erp_leftovers:
+        primary_idx = len(pairs)
+
+    matches = [
+        _result(erp, stmt, primary=(i == primary_idx), extra=extra)
+        for i, (erp, stmt, extra) in enumerate(entries)
+    ]
 
     for e in erp_group:
         matched_erp_ids.add(e.erp_id)

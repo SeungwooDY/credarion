@@ -257,6 +257,7 @@ interface MismatchItem {
   amount_delta: number | null;
   confidence: number | null;
   resolution_note: string | null;
+  match_details?: Record<string, unknown> | null;
   erp: SideRecord | null;
   statement: SideRecord | null;
 }
