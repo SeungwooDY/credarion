@@ -200,3 +200,42 @@ def test_summary_scoped_to_account(client_as_a, two_tenants):
     supplier_ids = {row["supplier_id"] for row in resp.json()}
     assert str(a["supplier"].id) in supplier_ids
     assert str(b["supplier"].id) not in supplier_ids
+
+
+def test_dashboard_autoselect_scoped_to_account(client_as_a, two_tenants):
+    """Without an explicit org_id, the dashboard must auto-select from the
+    caller's own orgs — never fall through to another tenant's first org."""
+    a, b = two_tenants
+    resp = client_as_a.get("/api/v1/reconciliation/dashboard")
+    assert resp.status_code == 200
+    supplier_ids = {row.get("supplier_id") for row in resp.json()}
+    assert str(b["supplier"].id) not in supplier_ids
+
+
+def test_dashboard_empty_for_account_without_org(db_session: Session, two_tenants):
+    """A user whose account has NO organization must see an empty dashboard
+    (0/0), not another tenant's suppliers auto-selected as the "first" org."""
+    account = Account(name="No Org Acct", plan="growth", subscription_status="active")
+    db_session.add(account)
+    db_session.flush()
+    noorg_user = User(
+        account_id=account.id, email="noorg@test.test", hashed_password="x",
+        full_name="No Org", is_active=True, is_superuser=False, role="accountant",
+    )
+    noorg_user.account = account
+    db_session.add(noorg_user)
+    db_session.commit()
+
+    def _override_get_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override_get_db
+    app.dependency_overrides[get_current_user] = lambda: noorg_user
+    try:
+        with TestClient(app) as c:
+            resp = c.get("/api/v1/reconciliation/dashboard")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 200
+    assert resp.json() == []

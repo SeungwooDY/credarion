@@ -12,6 +12,7 @@ from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 
 from app.auth_deps import (
+    accessible_org_ids,
     accessible_supplier_ids,
     authorize_supplier,
     get_current_user,
@@ -260,14 +261,15 @@ def dashboard_overview(
     org_id: uuid.UUID | None = Query(None),
     period: str | None = Query(None),
     db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
 ) -> list[dict]:
     """Per-supplier overview for the home dashboard.
 
     When ``org_id`` / ``period`` are omitted this auto-selects the first
-    organization and the most recent period that has reconciliation data, so the
-    dashboard "just works" for a single-org pilot. Each row carries monetary
-    ERP/statement totals, the unresolved discrepancy value, a coarse status, and
-    the action the user should take.
+    organization (scoped to the caller's account) and the most recent period
+    that has reconciliation data, so the dashboard "just works" for a single-org
+    pilot. Each row carries monetary ERP/statement totals, the unresolved
+    discrepancy value, a coarse status, and the action the user should take.
     """
     from collections import defaultdict
 
@@ -275,7 +277,11 @@ def dashboard_overview(
 
     # --- Auto-select org + period when not provided ---
     if org_id is None:
-        first_org = db.query(Organization).first()
+        allowed_orgs = accessible_org_ids(db, user)
+        org_q = db.query(Organization)
+        if allowed_orgs is not None:
+            org_q = org_q.filter(Organization.id.in_(allowed_orgs))
+        first_org = org_q.first()
         if first_org is None:
             return []
         org_id = first_org.id
