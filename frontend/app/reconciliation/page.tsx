@@ -59,7 +59,7 @@ const PROGRESS_PHRASE_KEYS = [
 
 function formatAmount(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—";
-  return `¥${n.toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  return `¥${n.toLocaleString("en-US", { maximumFractionDigits: 10 })}`;
 }
 
 function strField(d: Record<string, unknown> | null, key: string): string | null {
@@ -158,10 +158,10 @@ function ReviewRow({
           <div className="mt-1 flex items-center gap-4 text-xs text-zinc-500 flex-wrap">
             <span className="font-mono">{formatAmount(item.amount)}</span>
             {item.quantity_delta != null && item.quantity_delta !== 0 && (
-              <span>{t("reconciliation.qty_delta")}: <span className="font-mono text-amber-600">{item.quantity_delta.toFixed(2)}</span></span>
+              <span>{t("reconciliation.qty_delta")}: <span className="font-mono text-amber-600">{item.quantity_delta.toLocaleString(undefined, { maximumFractionDigits: 10 })}</span></span>
             )}
             {item.price_delta != null && item.price_delta !== 0 && (
-              <span>{t("reconciliation.price_delta")}: <span className="font-mono text-amber-600">{item.price_delta.toFixed(4)}</span></span>
+              <span>{t("reconciliation.price_delta")}: <span className="font-mono text-amber-600">{item.price_delta.toLocaleString(undefined, { maximumFractionDigits: 10 })}</span></span>
             )}
           </div>
           {showNote && item.discrepancy_note && (

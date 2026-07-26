@@ -864,6 +864,17 @@ def export_annotated_statement(
         if existing is None or (r.discrepancy_type and not existing.discrepancy_type):
             result_by_line[r.statement_line_id] = r
 
+    # Pre-aggregated statement lines: the run only references the group's
+    # primary line — fan its verdict out to every raw supplier row so each
+    # combined line gets annotated on the sheet. setdefault keeps any result
+    # a line already owns.
+    for r in results:
+        for lid in (r.match_details or {}).get("stmt_combined_line_ids", []):
+            try:
+                result_by_line.setdefault(uuid.UUID(lid), r)
+            except (ValueError, TypeError):
+                continue
+
     missing_erp_ids = [
         r.erp_record_id
         for r in results
@@ -990,6 +1001,12 @@ def list_mismatches(
         erp = erp_map.get(r.erp_record_id) if r.erp_record_id else None
         stmt = stmt_map.get(r.statement_line_id) if r.statement_line_id else None
 
+        # Pre-aggregated statement lines: deltas were computed against the
+        # combined totals, so display those rather than the primary raw line.
+        md = r.match_details or {}
+        stmt_qty = md.get("stmt_combined_qty") if md.get("stmt_combined_lines") else None
+        stmt_amt = md.get("stmt_combined_amount") if md.get("stmt_combined_lines") else None
+
         item = {
             "id": str(r.id),
             "match_type": r.match_type,
@@ -1014,9 +1031,9 @@ def list_mismatches(
             "statement": {
                 "po_number": stmt.po_number,
                 "material_number": stmt.material_number,
-                "quantity": float(stmt.quantity),
+                "quantity": float(stmt_qty) if stmt_qty is not None else float(stmt.quantity),
                 "unit_price": float(stmt.unit_price),
-                "amount": float(stmt.amount),
+                "amount": float(stmt_amt) if stmt_amt is not None else float(stmt.amount),
                 "delivery_date": stmt.delivery_date.isoformat() if stmt.delivery_date else None,
             } if stmt else None,
         }

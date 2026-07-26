@@ -149,10 +149,12 @@ class ERPRecord(Base):
     po_number: Mapped[str] = mapped_column(String, nullable=False, index=True)
     material_number: Mapped[str] = mapped_column(String, nullable=False, index=True)
 
-    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
-    po_price: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
-    unit_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
-    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # Unconstrained NUMERIC (migration 0009): suppliers quote values to the
+    # 4th decimal place and beyond — never round at storage.
+    quantity: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    po_price: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    unit_price: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
 
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
     vat_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -204,9 +206,10 @@ class StatementLineItem(Base):
     po_number: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     material_number: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
 
-    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
-    unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 4), nullable=False)
-    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    # Unconstrained NUMERIC (migration 0009) — never round supplier values.
+    quantity: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric, nullable=False)
 
     delivery_date: Mapped[date | None] = mapped_column(nullable=True)
     delivery_note_ref: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -331,9 +334,10 @@ class ReconciliationResult(Base):
     # match_type: exact | near_exact | fuzzy | multi_delivery | aggregate | ai | unmatched
     #   (multi_po_dn appears in historical rows; retired by ADR-0001)
     match_type: Mapped[str] = mapped_column(String, nullable=False)
-    quantity_delta: Mapped[Decimal | None] = mapped_column(Numeric(14, 3), nullable=True)
-    price_delta: Mapped[Decimal | None] = mapped_column(Numeric(12, 4), nullable=True)
-    amount_delta: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
+    # Unconstrained NUMERIC (migration 0009) — deltas keep full precision.
+    quantity_delta: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    price_delta: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
+    amount_delta: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)
     # discrepancy_type: quantity_over | quantity_under | price_higher | price_lower |
     #                   missing_from_erp | missing_from_statement
     discrepancy_type: Mapped[str | None] = mapped_column(String, nullable=True)

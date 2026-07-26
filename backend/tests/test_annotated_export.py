@@ -139,6 +139,28 @@ class TestClassifyResult:
         assert "数量差异 -3" in note
         assert "Supplier over-billed" in note
 
+    def test_fine_decimals_never_rounded(self):
+        # Suppliers quote prices to the 4th decimal place and beyond
+        # (e.g. 0.6575) — deltas must render at full precision.
+        _, note, _ = classify_result(_result(
+            discrepancy_type="price_higher",
+            price_delta=Decimal("0.6575"),
+        ))
+        assert "单价差异 +0.6575" in note
+
+        _, note, _ = classify_result(_result(
+            discrepancy_type="price_higher",
+            price_delta=Decimal("0.123456"),
+        ))
+        assert "单价差异 +0.123456" in note
+
+    def test_trailing_zeros_trimmed_not_rounded(self):
+        _, note, _ = classify_result(_result(
+            discrepancy_type="price_higher",
+            price_delta=Decimal("0.650000"),
+        ))
+        assert "单价差异 +0.65" in note
+
 
 # ============================================================
 # build_annotated_workbook

@@ -163,7 +163,8 @@ export default function SpreadsheetGrid({
     if (value == null || value === "") return "";
     if (col.type === "number") {
       const n = Number(value);
-      return isNaN(n) ? String(value) : n.toLocaleString(undefined, { maximumFractionDigits: 4 });
+      // Never round supplier decimals (prices like 0.6575 must show in full).
+      return isNaN(n) ? String(value) : n.toLocaleString(undefined, { maximumFractionDigits: 10 });
     }
     if (col.type === "select") {
       const opt = col.options?.find((o) => o.value === value);

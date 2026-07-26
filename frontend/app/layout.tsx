@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Credarion — Accounting Co-pilot",
+  title: "Credarion",
   description: "AI-powered accounting for APAC mid-market companies",
 };
 

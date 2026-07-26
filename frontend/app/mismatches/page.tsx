@@ -73,17 +73,19 @@ type FilterType = "all" | "missing_from_erp" | "missing_from_statement" | "quant
 const MATCH_VIEW_CAP = 100;
 type ViewMode = "review" | "spreadsheet";
 
+// Supplier values are never rounded (some quote prices like 0.6575): the
+// `decimals` arg is a MINIMUM for alignment; extra real decimals always show.
 function formatNum(n: number | null | undefined, decimals = 2): string {
   if (n == null) return "-";
   return n.toLocaleString(undefined, {
     minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
+    maximumFractionDigits: Math.max(decimals, 10),
   });
 }
 
 function formatCurrency(n: number | null | undefined): string {
   if (n == null) return "-";
-  return `¥${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return `¥${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 10 })}`;
 }
 
 function DiscrepancyLabel({ type }: { type: string | null }) {
@@ -579,10 +581,13 @@ function SupplierCard({
                   </th>
                   <th className="text-left px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_issue")}</th>
                   <th className="text-left px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_po")}</th>
+                  <th className="text-left px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_date")}</th>
                   <th className="text-left px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_part_number")}</th>
                   <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_erp_qty")}</th>
                   <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_stmt_qty")}</th>
                   <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_qty_delta")}</th>
+                  <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_erp_price")}</th>
+                  <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_stmt_price")}</th>
                   <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_erp_amt")}</th>
                   <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_stmt_amt")}</th>
                   <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_amt_delta")}</th>
@@ -594,6 +599,9 @@ function SupplierCard({
                 {displayItems.map((item) => {
                   const po = item.erp?.po_number || item.statement?.po_number || "-";
                   const pn = item.erp?.material_number || item.statement?.material_number || "-";
+                  const stmtDate = item.statement?.delivery_date?.slice(0, 10);
+                  const grnDate = item.erp?.grn_date?.slice(0, 10);
+                  const date = stmtDate || grnDate || "-";
                   const isMatch = !item.discrepancy_type;
                   const md = item.match_details;
                   const isGrouped =
@@ -651,6 +659,12 @@ function SupplierCard({
                       </td>
                       <td className="px-3 py-2 font-mono whitespace-nowrap">{po}</td>
                       <td
+                        className="px-3 py-2 font-mono whitespace-nowrap text-zinc-600"
+                        title={`${t("mismatches.stmt_label")} ${stmtDate ?? "-"} / ${t("mismatches.erp_label")} ${grnDate ?? "-"}`}
+                      >
+                        {date}
+                      </td>
+                      <td
                         className="px-3 py-2 font-mono whitespace-nowrap text-zinc-600 max-w-[180px] truncate"
                         title={pn}
                       >
@@ -669,6 +683,18 @@ function SupplierCard({
                           </span>
                         ) : (
                           "-"
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono">
+                        {item.erp?.po_price != null ? formatNum(item.erp.po_price, 2) : <span className="text-red-300">-</span>}
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono">
+                        {item.statement?.unit_price != null ? (
+                          <span className={item.price_delta ? "text-purple-600 font-medium" : ""}>
+                            {formatNum(item.statement.unit_price, 2)}
+                          </span>
+                        ) : (
+                          <span className="text-amber-300">-</span>
                         )}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
@@ -866,6 +892,7 @@ function buildSpreadsheetColumns(t: TFunction): GridColumn[] {
     { key: "discrepancy", label: t("mismatches.col_issue"), width: 130 },
     { key: "po_number", label: t("mismatches.col_po_number"), width: 120 },
     { key: "part_number", label: t("mismatches.col_part_number"), width: 150 },
+    { key: "date", label: t("mismatches.col_date"), width: 100 },
     { key: "erp_qty", label: t("mismatches.col_erp_qty"), width: 80, editable: true, type: "number", align: "right" },
     { key: "stmt_qty", label: t("mismatches.col_stmt_qty"), width: 80, editable: true, type: "number", align: "right" },
     { key: "qty_delta", label: t("mismatches.col_qty_delta"), width: 80, align: "right" },
@@ -887,6 +914,7 @@ function supplierToRows(supplier: SupplierMismatch): GridRow[] {
     discrepancy: item.discrepancy_type ?? "",
     po_number: item.erp?.po_number || item.statement?.po_number || "",
     part_number: item.erp?.material_number || item.statement?.material_number || "",
+    date: item.statement?.delivery_date?.slice(0, 10) || item.erp?.grn_date?.slice(0, 10) || "",
     erp_qty: item.erp?.quantity ?? null,
     stmt_qty: item.statement?.quantity ?? null,
     qty_delta: item.quantity_delta,

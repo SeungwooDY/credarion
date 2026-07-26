@@ -35,7 +35,13 @@ _FILL_MISSING = PatternFill("solid", start_color="FDE2E2")  # light red
 
 
 def _fmt_delta(val: Any) -> str:
-    return f"{float(val):+g}"
+    """Signed delta at full precision — supplier decimals are never rounded
+    (e.g. 0.6575 stays 0.6575); only trailing zeros are trimmed."""
+    from decimal import Decimal
+
+    d = val if isinstance(val, Decimal) else Decimal(str(val))
+    s = format(d, "+f")
+    return s.rstrip("0").rstrip(".") if "." in s else s
 
 
 def classify_result(r: Any) -> tuple[str, str, PatternFill]:

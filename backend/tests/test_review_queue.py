@@ -446,7 +446,9 @@ def test_discrepancy_note_exact_spec_format():
     assert note == (
         "Small discrepancy detected. "
         "Quantity: ERP 100 vs Supplier 100.2 (delta: 0.2 units, 0.20%). "
-        "Price: ERP 10 vs Supplier 10.05 (delta: 0.0500, 0.50%). "
+        # Price delta renders at the Decimal's own precision — supplier
+        # decimals are never rounded or zero-padded (2026-07-26).
+        "Price: ERP 10 vs Supplier 10.05 (delta: 0.05, 0.50%). "
         "Likely rounding or minor data entry difference — confirm with supplier."
     )
 

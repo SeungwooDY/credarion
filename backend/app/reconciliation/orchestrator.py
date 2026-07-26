@@ -34,6 +34,7 @@ from app.reconciliation.exact_match import (
 )
 from app.reconciliation.fuzzy_match import run_fuzzy_match
 from app.reconciliation.multi_delivery import run_multi_delivery_match
+from app.reconciliation.preaggregate import combine_statement_lines
 
 logger = logging.getLogger(__name__)
 
@@ -216,7 +217,7 @@ def _discrepancy_note(match: MatchResult, in_tolerance: bool) -> str:
         f"Quantity: ERP {erp.quantity} vs Supplier {stmt.quantity} "
         f"(delta: {qty_delta} units, {qty_pct:.2f}%). "
         f"Price: ERP {erp.po_price} vs Supplier {stmt.unit_price} "
-        f"(delta: {float(price_delta):.4f}, {price_pct:.2f}%). "
+        f"(delta: {price_delta}, {price_pct:.2f}%). "
     )
     if in_tolerance:
         return (
@@ -542,6 +543,20 @@ async def run_reconciliation(
         erp_candidates = [_erp_to_candidate(r) for r in erp_records]
         stmt_items = [_stmt_to_item(l) for l in stmt_lines]
 
+        # Statement-side pre-aggregation: combine supplier lines whose
+        # identifying columns are ALL identical (PO, material, date, per-unit
+        # price, delivery note ref) — mirrors the factory's ERP-entry practice
+        # of keying several statement lines as one receipt. total_statement
+        # counts combined lines so the match rate stays consistent.
+        raw_stmt_count = len(stmt_items)
+        stmt_items, combined_groups = combine_statement_lines(stmt_items)
+        if combined_groups:
+            logger.info(
+                "[RECON DEBUG] Pre-aggregation: %d raw statement lines combined "
+                "into %d (%d groups)",
+                raw_stmt_count, len(stmt_items), len(combined_groups),
+            )
+
         run.total_erp = len(erp_candidates)
         run.total_statement = len(stmt_items)
 
@@ -736,6 +751,22 @@ async def run_reconciliation(
         if unmatched_stmt:
             sample_stmt = [(s.po_number, s.material_number, str(s.quantity)) for s in unmatched_stmt[:5]]
             logger.info("[RECON DEBUG] Sample unmatched stmt: %s", sample_stmt)
+
+        # Stamp results that reference a pre-aggregated statement line with the
+        # group's raw-line ids and totals, so the mismatch API can show the
+        # combined qty/amount and the annotated export can write the group
+        # verdict onto every raw supplier row.
+        if combined_groups:
+            for r in all_results:
+                grp = combined_groups.get(r.statement_line_id)
+                if grp is not None:
+                    r.match_details = {
+                        **(r.match_details or {}),
+                        "stmt_combined_lines": len(grp.line_ids),
+                        "stmt_combined_line_ids": [str(i) for i in grp.line_ids],
+                        "stmt_combined_qty": float(grp.quantity),
+                        "stmt_combined_amount": float(grp.amount),
+                    }
 
         # Bulk insert results
         db.add_all(all_results)
