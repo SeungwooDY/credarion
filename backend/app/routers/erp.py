@@ -29,6 +29,7 @@ class GRNIngestionResponse(BaseModel):
     rows_ingested: int = 0
     rows_skipped: int = 0
     rows_duplicate: int = 0
+    rows_replaced: int = 0
     suppliers_created: int = 0
     suppliers_existing: int = 0
     errors: list[str] = []
@@ -38,6 +39,7 @@ class GRNIngestionResponse(BaseModel):
 def upload_grn(
     file: UploadFile = File(...),
     org_id: uuid.UUID = Form(...),
+    replace: bool = Form(False),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> GRNIngestionResponse:
@@ -45,6 +47,11 @@ def upload_grn(
 
     Accepts .csv, .xlsx, or .xls files. Automatically maps columns,
     upserts suppliers, normalizes data, and inserts erp_records.
+
+    With ``replace=true``, rows already in the DB (same supplier + PO +
+    material + GRN number) are purged and re-ingested instead of skipped —
+    use to recapture full decimal precision for pre-0009 uploads. Re-run
+    reconciliation afterwards.
     """
     authorize_org(db, user, org_id)
     suffix = (
@@ -60,6 +67,7 @@ def upload_grn(
         file_path=tmp_path,
         org_id=org_id,
         db=db,
+        replace=replace,
     )
 
     response = GRNIngestionResponse(
@@ -67,6 +75,7 @@ def upload_grn(
         rows_ingested=result.rows_ingested,
         rows_skipped=result.rows_skipped,
         rows_duplicate=result.rows_duplicate,
+        rows_replaced=result.rows_replaced,
         suppliers_created=result.suppliers_created,
         suppliers_existing=result.suppliers_existing,
         errors=result.errors,
@@ -82,6 +91,7 @@ def upload_grn(
 def upload_grn_stream(
     file: UploadFile = File(...),
     org_id: uuid.UUID = Form(...),
+    replace: bool = Form(False),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> StreamingResponse:
@@ -114,13 +124,17 @@ def upload_grn_stream(
     def run_ingestion() -> None:
         db = SessionLocal()
         try:
-            result = ingest_grn(file_path=tmp_path, org_id=org_id, db=db, on_progress=on_progress)
+            result = ingest_grn(
+                file_path=tmp_path, org_id=org_id, db=db,
+                on_progress=on_progress, replace=replace,
+            )
             progress_queue.put({
                 "type": "result",
                 "status": result.status,
                 "rows_ingested": result.rows_ingested,
                 "rows_skipped": result.rows_skipped,
                 "rows_duplicate": result.rows_duplicate,
+                "rows_replaced": result.rows_replaced,
                 "suppliers_created": result.suppliers_created,
                 "suppliers_existing": result.suppliers_existing,
                 "errors": result.errors,

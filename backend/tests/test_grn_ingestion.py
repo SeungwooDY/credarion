@@ -518,6 +518,68 @@ class TestGRNIngestionE2E:
         assert currencies["600001"] == "USD"
         assert currencies["600002"] == "HKD"
 
+    def test_replace_mode_purges_and_reingests(self, db_session: Session, org: Organization):
+        """replace=True swaps stored rows for the file's rows (same dedup key)
+        instead of skipping them — the full-precision re-ingest path."""
+        def _row(price: str, amount: str) -> dict:
+            return {
+                "供应商编码": "SDD201",
+                "供应商名称": "奥雄电子",
+                "采购订单号": "428759",
+                "物料编码": "ABC*1234*5*678",
+                "收货数量": "100",
+                "采购单价": price,
+                "金额": amount,
+                "币别": "RMB",
+                "收货单号": "GRN-2026-001",
+                "收货日期": "2026-03-05",
+            }
+
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w") as f:
+            first = f.name
+        _make_grn_csv([_row("0.6575", "65.75")], first)
+        assert ingest_grn(first, org.id, db_session).rows_ingested == 1
+
+        # Same key again: normal mode skips as duplicate…
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w") as f:
+            second = f.name
+        _make_grn_csv([_row("0.65753", "65.753")], second)
+        dup = ingest_grn(second, org.id, db_session)
+        assert dup.rows_ingested == 0
+        assert dup.rows_duplicate == 1
+
+        # …replace mode purges the stored row and inserts the fresh one.
+        rep = ingest_grn(second, org.id, db_session, replace=True)
+        assert rep.rows_ingested == 1
+        assert rep.rows_replaced == 1
+        records = db_session.query(ERPRecord).filter_by(po_number="428759").all()
+        assert len(records) == 1
+        assert records[0].po_price == Decimal("0.65753")
+        assert records[0].amount == Decimal("65.753")
+
+    def test_replace_mode_dedupes_within_file(self, db_session: Session, org: Organization):
+        """Two identical-key rows in ONE file: only the first is ingested,
+        even in replace mode."""
+        row = {
+            "供应商编码": "SDD201",
+            "供应商名称": "奥雄电子",
+            "采购订单号": "428800",
+            "物料编码": "ABC*1234*5*678",
+            "收货数量": "100",
+            "采购单价": "0.50",
+            "金额": "50.00",
+            "币别": "RMB",
+            "收货单号": "GRN-2026-009",
+            "收货日期": "2026-03-05",
+        }
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w") as f:
+            tmp_path = f.name
+        _make_grn_csv([row, dict(row)], tmp_path)
+        result = ingest_grn(tmp_path, org.id, db_session, replace=True)
+        assert result.rows_ingested == 1
+        assert result.rows_duplicate == 1
+        assert result.rows_replaced == 0
+
 
 # ============================================================
 # Real GRN File (skipped if data not present)

@@ -57,6 +57,7 @@ class GRNIngestionResult:
     rows_ingested: int = 0
     rows_skipped: int = 0
     rows_duplicate: int = 0
+    rows_replaced: int = 0
     suppliers_created: int = 0
     suppliers_existing: int = 0
     errors: list[str] = field(default_factory=list)
@@ -176,6 +177,7 @@ def ingest_grn(
     org_id: uuid.UUID,
     db: Session,
     on_progress: object = None,
+    replace: bool = False,
 ) -> GRNIngestionResult:
     """Full ingestion pipeline for SGWERP GRN CSV export.
 
@@ -183,6 +185,12 @@ def ingest_grn(
         file_path: Path to the GRN CSV file.
         org_id: UUID of the organization.
         db: SQLAlchemy session.
+        replace: purge & re-ingest — rows whose dedup key already exists in
+            the DB replace the stored record instead of being skipped. Needed
+            to recapture full decimal precision for data uploaded before
+            migration 0009 (old column scales rounded at insert). Existing
+            reconciliation results keep working (FK is SET NULL); re-run
+            reconciliation afterwards.
 
     Returns:
         GRNIngestionResult with status, counts, and any errors.
@@ -242,18 +250,23 @@ def ingest_grn(
     if on_progress:
         on_progress("suppliers", len(vendor_map), len(vendor_map), f"{len(vendor_map)} suppliers ready")
 
-    # Step 5: Load existing keys for deduplication
+    # Step 5: Load existing keys for deduplication (with row ids so replace
+    # mode can purge the stored rows it supersedes).
     existing_keys: set[tuple[str, str, str, str]] = set()
+    ids_by_key: dict[tuple[str, str, str, str], list] = {}
     existing_rows = db.execute(
         select(
             ERPRecord.supplier_id,
             ERPRecord.po_number,
             ERPRecord.material_number,
             ERPRecord.grn_number,
+            ERPRecord.id,
         ).where(ERPRecord.org_id == org_id)
     ).all()
     for row_key in existing_rows:
-        existing_keys.add((str(row_key[0]), row_key[1], row_key[2], row_key[3]))
+        key = (str(row_key[0]), row_key[1], row_key[2], row_key[3])
+        existing_keys.add(key)
+        ids_by_key.setdefault(key, []).append(row_key[4])
     if on_progress:
         on_progress("dedup", len(existing_keys), len(existing_keys),
                      f"Found {len(existing_keys)} existing records for dedup check")
@@ -263,6 +276,9 @@ def ingest_grn(
     records: list[ERPRecord] = []
     skipped = 0
     duplicates = 0
+    replaced = 0
+    ids_to_purge: list = []
+    seen_in_file: set[tuple[str, str, str, str]] = set()
 
     vend_col = col_map["vend_no"] if "vend_no" in col_map else None
 
@@ -307,11 +323,21 @@ def ingest_grn(
                 skipped += 1
                 continue
 
-            # Dedup check
+            # Dedup check. A key seen earlier in THIS file is always a
+            # duplicate. A key already stored in the DB is a duplicate in
+            # normal mode; in replace mode the stored row(s) are purged and
+            # the fresh row inserted (full-precision re-ingest).
             dedup_key = (str(vendor_map[vend_code]), po, material, grn_number)
-            if dedup_key in existing_keys:
+            if dedup_key in seen_in_file:
                 duplicates += 1
                 continue
+            if dedup_key in existing_keys:
+                if not replace:
+                    duplicates += 1
+                    continue
+                ids_to_purge.extend(ids_by_key.get(dedup_key, []))
+                replaced += 1
+            seen_in_file.add(dedup_key)
             existing_keys.add(dedup_key)
 
             record = ERPRecord(
@@ -338,13 +364,21 @@ def ingest_grn(
             skipped += 1
             logger.warning("Skipping row %s: %s", idx, e)
 
-    # Step 7: Bulk insert
+    # Step 7: Purge superseded rows (replace mode), then bulk insert.
+    if ids_to_purge:
+        if on_progress:
+            on_progress("saving", 0, len(records),
+                        f"Replacing {len(ids_to_purge)} existing records...")
+        db.query(ERPRecord).filter(ERPRecord.id.in_(ids_to_purge)).delete(
+            synchronize_session=False
+        )
     if on_progress:
         on_progress("saving", 0, len(records), f"Saving {len(records)} records to database...")
     db.add_all(records)
     result.rows_ingested = len(records)
     result.rows_skipped = skipped
     result.rows_duplicate = duplicates
+    result.rows_replaced = replaced
     result.status = "success"
 
     db.commit()

@@ -56,6 +56,7 @@ export default function IngestionPage() {
   const [grnFile, setGrnFile] = useState<File | null>(null);
   const [grnStatus, setGrnStatus] = useState("");
   const [grnLoading, setGrnLoading] = useState(false);
+  const [grnReplace, setGrnReplace] = useState(false);
 
   const [stmtFile, setStmtFile] = useState<File | null>(null);
   const [stmtStep, setStmtStep] = useState<"select" | "preview" | "done">("select");
@@ -74,6 +75,7 @@ export default function IngestionPage() {
     const fd = new FormData();
     fd.append("file", grnFile);
     fd.append("org_id", orgId);
+    if (grnReplace) fd.append("replace", "true");
 
     try {
       const res = await fetch("/api/v1/erp/upload-stream", {
@@ -113,6 +115,11 @@ export default function IngestionPage() {
                 skipped: data.rows_skipped,
                 created: data.suppliers_created,
               });
+              if (data.rows_replaced > 0) {
+                finalResult += t("ingestion.grn_result_replaced", {
+                  replaced: data.rows_replaced,
+                });
+              }
             }
           }
         }
@@ -256,6 +263,17 @@ export default function IngestionPage() {
             labels={dzLabels}
             className="mb-3"
           />
+
+          <label className="flex items-center gap-2 mb-3 text-xs text-zinc-600 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={grnReplace}
+              onChange={(e) => setGrnReplace(e.target.checked)}
+              disabled={grnLoading}
+              className="rounded"
+            />
+            {t("ingestion.grn_replace_existing")}
+          </label>
 
           <button
             onClick={uploadGRN}
