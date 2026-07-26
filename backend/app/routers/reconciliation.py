@@ -1027,6 +1027,8 @@ def list_mismatches(
                 "po_price": float(erp.po_price),
                 "amount": float(erp.amount),
                 "grn_date": erp.grn_date.isoformat() if erp.grn_date else None,
+                "grn_number": erp.grn_number,
+                "delivery_note": erp.delivery_note,
             } if erp else None,
             "statement": {
                 "po_number": stmt.po_number,
@@ -1035,6 +1037,7 @@ def list_mismatches(
                 "unit_price": float(stmt.unit_price),
                 "amount": float(stmt_amt) if stmt_amt is not None else float(stmt.amount),
                 "delivery_date": stmt.delivery_date.isoformat() if stmt.delivery_date else None,
+                "delivery_note_ref": stmt.delivery_note_ref,
             } if stmt else None,
         }
         by_supplier[r.supplier_id].append(item)
