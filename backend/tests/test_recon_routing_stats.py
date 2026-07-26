@@ -122,6 +122,28 @@ class TestRunStats:
         assert stats["discrepancy_count"] == 1
         assert stats["matched_count"] == 2
 
+    def test_missing_from_statement_drags_rate_down(self):
+        """ERP receipts absent from the statement are real issues (2026-07-26):
+        they join the match-rate denominator, so an incomplete statement can
+        never score 100%."""
+        results = [
+            _FakeResult(match_type="exact", statement_line_id=uuid.uuid4()),
+            _FakeResult(match_type="unmatched", discrepancy_type="missing_from_statement"),
+        ]
+        stats = _compute_run_stats(results, total_statement=1)
+        assert stats["matched_count"] == 1
+        assert stats["unmatched_erp_count"] == 1
+        # 1 matched / (1 statement line + 1 missing) = 50%
+        assert stats["auto_match_rate"] == Decimal("50.0")
+
+    def test_fully_matched_still_100(self):
+        results = [
+            _FakeResult(match_type="exact", statement_line_id=uuid.uuid4()),
+            _FakeResult(match_type="exact", statement_line_id=uuid.uuid4()),
+        ]
+        stats = _compute_run_stats(results, total_statement=2)
+        assert stats["auto_match_rate"] == Decimal("100")
+
     def test_unmatched_and_empty_statement(self):
         results = [
             _FakeResult(match_type="unmatched", discrepancy_type="missing_from_statement"),

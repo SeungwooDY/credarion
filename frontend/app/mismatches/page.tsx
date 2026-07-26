@@ -157,6 +157,9 @@ function MatchExplanation({ supplier }: { supplier: SupplierMismatch }) {
   const t = useT();
   const s = supplier;
   const matchedCount = s.total_statement - s.unmatched_stmt;
+  // Two-sided denominator: ERP receipts missing from the statement count
+  // against the rate (they're real issues the supplier must re-issue for).
+  const totalToReconcile = s.total_statement + s.unmatched_erp;
   const matchPct = s.match_rate ?? 0;
 
   return (
@@ -168,7 +171,7 @@ function MatchExplanation({ supplier }: { supplier: SupplierMismatch }) {
           <div className="text-zinc-400 mb-0.5">{t("mismatches.statement_items_matched")}</div>
           <div className="font-mono text-sm">
             <span className="font-semibold text-green-600">{matchedCount}</span>
-            <span className="text-zinc-400"> / {s.total_statement}</span>
+            <span className="text-zinc-400"> / {totalToReconcile}</span>
             <span className={`ml-1 font-semibold ${matchPct >= 90 ? "text-green-600" : matchPct >= 70 ? "text-amber-600" : "text-red-500"}`}>
               ({matchPct.toFixed(1)}%)
             </span>

@@ -338,9 +338,13 @@ def _compute_run_stats(all_results: list, total_statement: int | None) -> dict[s
       - discrepancy_count: results carrying a discrepancy_type. Aggregation
         layers set discrepancy_type ONLY on the group's primary row, so a
         discrepant group counts once, not once per constituent row.
-      - auto_match_rate: statement-centric (matched stmt lines / total stmt
-        lines) with a defensive 100% cap — distinct counting makes >100%
-        impossible, the cap is a belt-and-braces invariant.
+      - auto_match_rate: two-sided (2026-07-26, accountant feedback). ERP
+        receipts missing from the statement are REAL issues, not
+        informational — they join the denominator so a supplier who omits
+        deliveries can't score 100%:
+            matched stmt lines / (total stmt lines + missing-from-statement)
+        Defensive 100% cap — distinct counting makes >100% impossible, the
+        cap is a belt-and-braces invariant.
     """
     matched_stmt_ids = {
         r.statement_line_id
@@ -354,8 +358,9 @@ def _compute_run_stats(all_results: list, total_statement: int | None) -> dict[s
         1 for r in all_results
         if r.match_type == "unmatched" and r.discrepancy_type == "missing_from_statement"
     )
-    if total_statement and total_statement > 0:
-        rate = min(Decimal("100"), Decimal(str(round(matched_count / total_statement * 100, 2))))
+    denominator = (total_statement or 0) + unmatched_erp_count
+    if denominator > 0:
+        rate = min(Decimal("100"), Decimal(str(round(matched_count / denominator * 100, 2))))
     else:
         rate = Decimal("0")
     return {
@@ -779,11 +784,11 @@ async def run_reconciliation(
         run.auto_match_rate = stats["auto_match_rate"]
 
         logger.info(
-            "[RECON DEBUG] Match rate: %d/%d statement items matched (%.1f%%). "
-            "%d ERP items not in statement (informational).",
+            "[RECON DEBUG] Match rate: %d matched / (%d statement items + %d "
+            "missing from statement) = %.1f%%.",
             stats["matched_count"], run.total_statement or 0,
-            float(run.auto_match_rate),
             stats["unmatched_erp_count"],
+            float(run.auto_match_rate),
         )
         run.status = "completed"
         run.completed_at = datetime.utcnow()
