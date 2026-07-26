@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import (
     ERPRecord,
+    PeriodSignoff,
     ReconciliationConfig,
     ReconciliationResult,
     ReconciliationRun,
@@ -130,6 +131,61 @@ def _load_config(db: Session, org_id: Any) -> dict[str, Any]:
         "ai_layer_enabled": True,
         "ai_max_tokens_per_run": 10000,
     }
+
+
+def _load_carryover(
+    db: Session, supplier_id: Any, period: str
+) -> tuple[list[ERPRecord], dict[Any, str], dict[Any, list[ReconciliationResult]]]:
+    """ERP receipts flagged missing_from_statement in PRIOR periods, still
+    unresolved. Suppliers often re-include omitted items in the next month's
+    statement, so these join the current run as match candidates instead of
+    staying dead discrepancies.
+
+    Only the latest completed run per prior period is consulted (reruns
+    supersede). Returns (records, origin_period_by_erp_id,
+    prior_results_by_erp_id); origin keeps the EARLIEST period an item went
+    missing in, prior_results holds every open prior result so a later match
+    can close them all.
+    """
+    prior_runs = (
+        db.query(ReconciliationRun)
+        .filter(
+            ReconciliationRun.supplier_id == supplier_id,
+            ReconciliationRun.status == "completed",
+            ReconciliationRun.period < period,
+        )
+        .order_by(ReconciliationRun.started_at.desc())
+        .all()
+    )
+    latest_by_period: dict[str, ReconciliationRun] = {}
+    for r in prior_runs:
+        latest_by_period.setdefault(r.period, r)
+    if not latest_by_period:
+        return [], {}, {}
+
+    period_by_run_id = {run.id: p for p, run in latest_by_period.items()}
+    prior_results = (
+        db.query(ReconciliationResult)
+        .filter(
+            ReconciliationResult.run_id.in_(list(period_by_run_id)),
+            ReconciliationResult.discrepancy_type == "missing_from_statement",
+            ReconciliationResult.status == REVIEW_UNMATCHED,
+            ReconciliationResult.erp_record_id.isnot(None),
+        )
+        .all()
+    )
+    origin: dict[Any, str] = {}
+    prior_by_erp: dict[Any, list[ReconciliationResult]] = defaultdict(list)
+    for res in prior_results:
+        p = period_by_run_id[res.run_id]
+        if res.erp_record_id not in origin or p < origin[res.erp_record_id]:
+            origin[res.erp_record_id] = p
+        prior_by_erp[res.erp_record_id].append(res)
+    if not origin:
+        return [], {}, {}
+
+    records = db.query(ERPRecord).filter(ERPRecord.id.in_(list(origin))).all()
+    return records, origin, prior_by_erp
 
 
 def _erp_to_candidate(record: ERPRecord) -> MatchCandidate:
@@ -354,9 +410,14 @@ def _compute_run_stats(all_results: list, total_statement: int | None) -> dict[s
     matched_count = len(matched_stmt_ids)
     discrepancy_count = sum(1 for r in all_results if r.discrepancy_type is not None)
     unmatched_count = sum(1 for r in all_results if r.match_type == "unmatched")
+    # Carryover items (match_details.carryover_from) already counted against
+    # their origin period's rate — they stay visible as issues but don't
+    # re-penalize this period's denominator.
     unmatched_erp_count = sum(
         1 for r in all_results
-        if r.match_type == "unmatched" and r.discrepancy_type == "missing_from_statement"
+        if r.match_type == "unmatched"
+        and r.discrepancy_type == "missing_from_statement"
+        and not (r.match_details or {}).get("carryover_from")
     )
     denominator = (total_statement or 0) + unmatched_erp_count
     if denominator > 0:
@@ -545,7 +606,27 @@ async def run_reconciliation(
                     supplier_id,
                 )
 
-        erp_candidates = [_erp_to_candidate(r) for r in erp_records]
+        # Carryover: unresolved missing-from-statement receipts from prior
+        # periods become candidates — the supplier may finally have included
+        # them in this month's statement.
+        carryover_records, carryover_origin, carryover_prior = _load_carryover(
+            db, supplier_id, period
+        )
+        period_erp_ids = {r.id for r in erp_records}
+        carryover_records = [r for r in carryover_records if r.id not in period_erp_ids]
+        carryover_origin = {
+            k: v for k, v in carryover_origin.items() if k not in period_erp_ids
+        }
+        if carryover_records:
+            logger.info(
+                "[RECON DEBUG] Carryover: %d unresolved missing-from-statement "
+                "receipts from prior periods join as candidates",
+                len(carryover_records),
+            )
+
+        erp_candidates = [_erp_to_candidate(r) for r in erp_records] + [
+            _erp_to_candidate(r) for r in carryover_records
+        ]
         stmt_items = [_stmt_to_item(l) for l in stmt_lines]
 
         # Statement-side pre-aggregation: combine supplier lines whose
@@ -562,7 +643,9 @@ async def run_reconciliation(
                 raw_stmt_count, len(stmt_items), len(combined_groups),
             )
 
-        run.total_erp = len(erp_candidates)
+        # total_erp counts THIS period's receipts only — carryover candidates
+        # belong to their origin period and would distort the period totals.
+        run.total_erp = len(erp_records)
         run.total_statement = len(stmt_items)
 
         # Log sample PO numbers from each side to check alignment
@@ -756,6 +839,49 @@ async def run_reconciliation(
         if unmatched_stmt:
             sample_stmt = [(s.po_number, s.material_number, str(s.quantity)) for s in unmatched_stmt[:5]]
             logger.info("[RECON DEBUG] Sample unmatched stmt: %s", sample_stmt)
+
+        # Carryover bookkeeping: stamp each result touching a carried-over
+        # receipt with its origin period, and close the loop — a prior-period
+        # missing_from_statement result whose item finally matched resolves
+        # automatically (unless that period is signed off / locked).
+        if carryover_origin:
+            matched_carryover: set[Any] = set()
+            for r in all_results:
+                origin_period = carryover_origin.get(r.erp_record_id)
+                if origin_period is None:
+                    continue
+                r.match_details = {
+                    **(r.match_details or {}),
+                    "carryover_from": origin_period,
+                }
+                if r.match_type != "unmatched":
+                    matched_carryover.add(r.erp_record_id)
+
+            if matched_carryover:
+                locked_periods = {
+                    p
+                    for (p,) in db.query(PeriodSignoff.period).filter(
+                        PeriodSignoff.org_id == supplier.org_id,
+                        PeriodSignoff.status == "signed_off",
+                    )
+                }
+                resolved_n = 0
+                for erp_id in matched_carryover:
+                    for prior in carryover_prior.get(erp_id, []):
+                        if prior.period in locked_periods:
+                            continue
+                        prior.status = "resolved"
+                        prior.resolution_note = (
+                            f"Carried forward: matched in {period} statement"
+                        )
+                        prior.resolved_by = "system"
+                        prior.resolved_at = datetime.utcnow()
+                        resolved_n += 1
+                logger.info(
+                    "[RECON DEBUG] Carryover: %d receipts matched this period; "
+                    "%d prior-period discrepancies auto-resolved",
+                    len(matched_carryover), resolved_n,
+                )
 
         # Stamp results that reference a pre-aggregated statement line with the
         # group's raw-line ids and totals, so the mismatch API can show the
