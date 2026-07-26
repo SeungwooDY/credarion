@@ -796,6 +796,114 @@ def export_results(
         )
 
 
+@router.get("/annotated-statement")
+def export_annotated_statement(
+    supplier_id: uuid.UUID = Query(...),
+    period: str = Query(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    """Download the supplier's original statement with reconciliation results
+    written onto it (对账结果/备注 columns + missing-from-statement appendix).
+
+    Mirrors the accountant's manual workflow: mark the discrepancies on the
+    statement itself and send it back to the supplier.
+    """
+    from app.models import SupplierColumnMapping
+    from app.reconciliation.annotate import build_annotated_workbook
+
+    authorize_supplier(db, user, supplier_id)
+
+    latest_run = (
+        db.query(ReconciliationRun)
+        .filter(
+            ReconciliationRun.supplier_id == supplier_id,
+            ReconciliationRun.period == period,
+            ReconciliationRun.status == "completed",
+        )
+        .order_by(desc(ReconciliationRun.started_at))
+        .first()
+    )
+    if not latest_run:
+        raise HTTPException(
+            status_code=404,
+            detail="No completed reconciliation run for this supplier and period",
+        )
+
+    statement = (
+        db.query(SupplierStatement)
+        .filter(
+            SupplierStatement.supplier_id == supplier_id,
+            SupplierStatement.period == period,
+        )
+        .order_by(desc(SupplierStatement.upload_date))
+        .first()
+    )
+    if not statement:
+        raise HTTPException(status_code=404, detail="No statement uploaded for this period")
+
+    line_items = (
+        db.query(StatementLineItem)
+        .filter(StatementLineItem.statement_id == statement.id)
+        .all()
+    )
+    results = (
+        db.query(ReconciliationResult)
+        .filter(ReconciliationResult.run_id == latest_run.id)
+        .all()
+    )
+
+    # One result per statement line. Aggregation layers can emit several rows
+    # for the same line (primary + constituents) — a row carrying the group's
+    # discrepancy_type wins over a plain constituent row.
+    result_by_line: dict[uuid.UUID, ReconciliationResult] = {}
+    for r in results:
+        if r.statement_line_id is None:
+            continue
+        existing = result_by_line.get(r.statement_line_id)
+        if existing is None or (r.discrepancy_type and not existing.discrepancy_type):
+            result_by_line[r.statement_line_id] = r
+
+    missing_erp_ids = [
+        r.erp_record_id
+        for r in results
+        if r.discrepancy_type == "missing_from_statement"
+        and r.erp_record_id
+        and r.status != "resolved"
+    ]
+    missing_erp = (
+        db.query(ERPRecord).filter(ERPRecord.id.in_(missing_erp_ids)).all()
+        if missing_erp_ids
+        else []
+    )
+
+    # 1-based header row in the original file, from the supplier's cached
+    # column mapping (0-based there); the builder falls back gracefully.
+    mapping = (
+        db.query(SupplierColumnMapping)
+        .filter(SupplierColumnMapping.supplier_id == supplier_id)
+        .first()
+    )
+    header_excel_row = mapping.header_row + 1 if mapping else None
+
+    buf = build_annotated_workbook(
+        file_path=statement.file_url,
+        header_excel_row=header_excel_row,
+        line_items=line_items,
+        result_by_line=result_by_line,
+        missing_erp=missing_erp,
+    )
+
+    supplier = db.query(Supplier).filter(Supplier.id == supplier_id).first()
+    vendor = supplier.vendor_code if supplier else str(supplier_id)[:8]
+    filename = f"statement_{vendor}_{period}_annotated.xlsx"
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/mismatches")
 def list_mismatches(
     org_id: uuid.UUID = Query(...),
@@ -968,18 +1076,12 @@ def get_config(
             org_id=str(org_id),
             qty_tolerance_pct=0.50,
             price_tolerance_pct=0.50,
+            date_tolerance_days=3,
             auto_resolve_exact=True,
             ai_layer_enabled=True,
             ai_max_tokens_per_run=10000,
         )
-    return ConfigResponse(
-        org_id=str(config.org_id),
-        qty_tolerance_pct=float(config.qty_tolerance_pct),
-        price_tolerance_pct=float(config.price_tolerance_pct),
-        auto_resolve_exact=config.auto_resolve_exact,
-        ai_layer_enabled=config.ai_layer_enabled,
-        ai_max_tokens_per_run=config.ai_max_tokens_per_run,
-    )
+    return _config_to_response(config)
 
 
 @router.put("/config/{org_id}", response_model=ConfigResponse)
@@ -1002,6 +1104,8 @@ def update_config(
         config.qty_tolerance_pct = body.qty_tolerance_pct
     if body.price_tolerance_pct is not None:
         config.price_tolerance_pct = body.price_tolerance_pct
+    if body.date_tolerance_days is not None:
+        config.date_tolerance_days = body.date_tolerance_days
     if body.auto_resolve_exact is not None:
         config.auto_resolve_exact = body.auto_resolve_exact
     if body.ai_layer_enabled is not None:
@@ -1012,10 +1116,15 @@ def update_config(
     db.commit()
     db.refresh(config)
 
+    return _config_to_response(config)
+
+
+def _config_to_response(config: ReconciliationConfig) -> ConfigResponse:
     return ConfigResponse(
         org_id=str(config.org_id),
         qty_tolerance_pct=float(config.qty_tolerance_pct),
         price_tolerance_pct=float(config.price_tolerance_pct),
+        date_tolerance_days=config.date_tolerance_days,
         auto_resolve_exact=config.auto_resolve_exact,
         ai_layer_enabled=config.ai_layer_enabled,
         ai_max_tokens_per_run=config.ai_max_tokens_per_run,

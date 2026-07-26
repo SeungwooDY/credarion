@@ -6,6 +6,7 @@ import re
 import shutil
 import tempfile
 import uuid
+from pathlib import Path
 
 import pandas as pd
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -13,7 +14,9 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.auth_deps import authorize_org, authorize_supplier, get_current_user
+from app.config import settings
 from app.db import get_db
+from app.invoicing.file_storage import save_upload
 from app.period_lock import ensure_supplier_period_unlocked
 from app.ingestion.cleaning import normalize_po_number
 from app.ingestion.column_mapping import try_alias_mapping
@@ -250,18 +253,19 @@ async def upload_statement(
             db.delete(old_stmt)
             db.flush()
 
-    # Save uploaded file to a temp location
-    suffix = "." + file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else ".xlsx"
-    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-        shutil.copyfileobj(file.file, tmp)
-        tmp_path = tmp.name
+    # Persist the ORIGINAL file so the annotated export can reproduce it later
+    # (previously a throwaway temp file, which broke exports after restarts).
+    ext = file.filename.rsplit(".", 1)[-1] if file.filename and "." in file.filename else "xlsx"
+    _, relative_path = save_upload(file.file.read(), ext, settings.statement_upload_dir)
+    stored_path = str(Path(settings.statement_upload_dir) / relative_path)
 
     result: IngestionResult = await ingest_supplier_statement(
-        file_path=tmp_path,
+        file_path=stored_path,
         supplier_id=supplier_id,
         period=period,
         db=db,
         force_remap=replace,
+        original_filename=file.filename,
     )
 
     response = IngestionResponse(

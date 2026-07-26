@@ -182,6 +182,7 @@ class SupplierStatement(Base):
     )
     period: Mapped[str] = mapped_column(String, nullable=False)  # e.g. "2026-03"
     file_url: Mapped[str] = mapped_column(String, nullable=False)
+    original_filename: Mapped[str | None] = mapped_column(String, nullable=True)
     upload_date: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -209,6 +210,9 @@ class StatementLineItem(Base):
 
     delivery_date: Mapped[date | None] = mapped_column(nullable=True)
     delivery_note_ref: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # 1-based Excel row number in the ORIGINAL uploaded file (annotated export).
+    source_row: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     raw_row: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
@@ -286,6 +290,9 @@ class ReconciliationConfig(Base):
     price_tolerance_pct: Mapped[Decimal] = mapped_column(
         Numeric(5, 2), nullable=False, default=Decimal("0.50")
     )
+    # ERP grn_date vs statement delivery_date window (± days). Gaps beyond the
+    # window never block a match — they surface as a match-with-note.
+    date_tolerance_days: Mapped[int] = mapped_column(Integer, nullable=False, default=3)
     auto_resolve_exact: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     ai_layer_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     ai_max_tokens_per_run: Mapped[int] = mapped_column(Integer, nullable=False, default=10000)

@@ -47,6 +47,7 @@ async def ingest_supplier_statement(
     period: str,
     db: Session,
     force_remap: bool = False,
+    original_filename: str | None = None,
 ) -> IngestionResult:
     """Full ingestion pipeline for a supplier statement file.
 
@@ -158,6 +159,12 @@ async def ingest_supplier_statement(
     # Clean header names (handle multi-row headers with newlines)
     df.columns = clean_header_cells(list(df.columns.astype(str)))
 
+    # Track each line's 1-based row number in the ORIGINAL file so the
+    # annotated export can write results back onto the exact rows. The header
+    # sits at Excel row header_row+1 (0-based → 1-based), data starts right
+    # after it. Must be added before cleaning, which drops/reindexes rows.
+    df["_source_row"] = df.index + header_row + 2
+
     # Step 7: Clean data
     total_before = len(df)
     df = clean_dataframe(df, column_map)
@@ -168,6 +175,7 @@ async def ingest_supplier_statement(
         supplier_id=supplier_id,
         period=period,
         file_url=file_path,
+        original_filename=original_filename,
     )
     db.add(statement)
     db.flush()
@@ -198,6 +206,7 @@ async def ingest_supplier_statement(
                 if pd.notna(row.get("delivery_date")) and row.get("delivery_date") is not None
                 else None,
                 delivery_note_ref=row.get("delivery_note_ref"),
+                source_row=int(row["_source_row"]) if pd.notna(row.get("_source_row")) else None,
                 raw_row=row.get("_raw_row", {}),
             )
             line_items.append(item)

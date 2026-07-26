@@ -32,6 +32,7 @@ class BulkResolveRequest(BaseModel):
 class ConfigUpdate(BaseModel):
     qty_tolerance_pct: Decimal | None = None
     price_tolerance_pct: Decimal | None = None
+    date_tolerance_days: int | None = Field(None, ge=0, le=90)
     auto_resolve_exact: bool | None = None
     ai_layer_enabled: bool | None = None
     ai_max_tokens_per_run: int | None = None
@@ -120,6 +121,7 @@ class ConfigResponse(BaseModel):
     org_id: str
     qty_tolerance_pct: float
     price_tolerance_pct: float
+    date_tolerance_days: int = 3
     auto_resolve_exact: bool
     ai_layer_enabled: bool
     ai_max_tokens_per_run: int

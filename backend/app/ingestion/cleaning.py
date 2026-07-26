@@ -105,7 +105,9 @@ def clean_dataframe(
     Returns:
         Cleaned dataframe with canonical column names and normalized values.
     """
-    original_columns = list(df.columns)
+    # Ignore "_"-prefixed helper columns (e.g. _source_row) added by the
+    # ingestor — they are bookkeeping, not supplier data.
+    original_columns = [c for c in df.columns if not str(c).startswith("_")]
 
     # 1. Filter summary rows first (before _raw_row, so dict keys don't trigger false matches)
     df = filter_summary_rows(df)

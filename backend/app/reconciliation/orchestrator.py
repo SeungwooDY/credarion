@@ -116,6 +116,7 @@ def _load_config(db: Session, org_id: Any) -> dict[str, Any]:
         return {
             "qty_tolerance_pct": float(config.qty_tolerance_pct),
             "price_tolerance_pct": float(config.price_tolerance_pct),
+            "date_tolerance_days": config.date_tolerance_days,
             "auto_resolve_exact": config.auto_resolve_exact,
             "ai_layer_enabled": config.ai_layer_enabled,
             "ai_max_tokens_per_run": config.ai_max_tokens_per_run,
@@ -123,6 +124,7 @@ def _load_config(db: Session, org_id: Any) -> dict[str, Any]:
     return {
         "qty_tolerance_pct": 0.50,
         "price_tolerance_pct": 0.50,
+        "date_tolerance_days": 3,
         "auto_resolve_exact": True,
         "ai_layer_enabled": True,
         "ai_max_tokens_per_run": 10000,
@@ -227,7 +229,34 @@ def _discrepancy_note(match: MatchResult, in_tolerance: bool) -> str:
     )
 
 
-def _classify_review(match: MatchResult) -> dict[str, Any]:
+def _date_gap_note(match: MatchResult, date_tolerance_days: int) -> str | None:
+    """Match-with-note for date gaps beyond the configured ± window.
+
+    The accountant's guidance: an ERP grn_date vs statement delivery_date
+    mismatch is not a real problem as long as quantity and amount line up —
+    so it NEVER blocks or downgrades a match to a discrepancy; it only adds
+    an informational note (and moves an exact match into the attention queue).
+    Only applies to 1:1 pairs where both dates are present.
+    """
+    if match.erp is None or match.statement is None:
+        return None
+    grn, dd = match.erp.grn_date, match.statement.delivery_date
+    if grn is None or dd is None:
+        return None
+    try:
+        gap = abs((grn.date() if isinstance(grn, datetime) else grn) - dd).days
+    except TypeError:
+        return None
+    if gap <= date_tolerance_days:
+        return None
+    return (
+        f"Dates differ by {gap} days (ERP GRN {grn.date() if isinstance(grn, datetime) else grn} "
+        f"vs statement {dd}) — beyond the ±{date_tolerance_days}-day window. "
+        "Likely a timing difference; not a discrepancy if quantity and amount agree."
+    )
+
+
+def _classify_review(match: MatchResult, date_tolerance_days: int = 3) -> dict[str, Any]:
     """Map a matched MatchResult to its review-queue fields.
 
     Splits Layer-1 'exact' matches into 'exact' (deltas exactly zero) vs
@@ -275,6 +304,17 @@ def _classify_review(match: MatchResult) -> dict[str, Any]:
             )
             if md.get("resolution_note"):
                 note += f" Note: {md['resolution_note']}."
+
+    # Date window check (1:1 pairs only). A gap beyond ±date_tolerance_days is
+    # a match-with-note: an exact match moves to the near_exact attention queue
+    # so the note is visible, but it is never flagged as a discrepancy.
+    if review_type in ("exact", "near_exact", "fuzzy", "ai"):
+        date_note = _date_gap_note(match, date_tolerance_days)
+        if date_note:
+            if review_type == "exact":
+                review_type = "near_exact"
+                score, label, priority = 90, "Match — Date Mismatch", 2
+            note = f"{note} {date_note}" if note else date_note
 
     return {
         "match_type": review_type,
@@ -345,8 +385,9 @@ def _match_to_result(
     run_id: Any,
     supplier_id: Any,
     period: str,
+    date_tolerance_days: int = 3,
 ) -> ReconciliationResult:
-    review = _classify_review(match)
+    review = _classify_review(match, date_tolerance_days)
     details = {**(match.match_details or {}), "amount": _line_amount(match)}
     return ReconciliationResult(
         run_id=run_id,
@@ -396,6 +437,7 @@ async def run_reconciliation(
     config = _load_config(db, supplier.org_id)
     qty_tol = Decimal(str(config["qty_tolerance_pct"]))
     price_tol = Decimal(str(config["price_tolerance_pct"]))
+    date_tol_days = int(config["date_tolerance_days"])
 
     # Create run record
     run = ReconciliationRun(
@@ -552,7 +594,7 @@ async def run_reconciliation(
             len(unmatched_erp), len(unmatched_stmt),
         )
         for m in l1_matches:
-            all_results.append(_match_to_result(m, run.id, supplier_id, period))
+            all_results.append(_match_to_result(m, run.id, supplier_id, period, date_tol_days))
 
         # Layer 2: Fuzzy match (balanced groups only)
         l2_matches, unmatched_erp, unmatched_stmt = run_fuzzy_match(
@@ -567,7 +609,7 @@ async def run_reconciliation(
             len(unmatched_erp), len(unmatched_stmt),
         )
         for m in l2_matches:
-            all_results.append(_match_to_result(m, run.id, supplier_id, period))
+            all_results.append(_match_to_result(m, run.id, supplier_id, period, date_tol_days))
 
         # Layer 3: Multi-delivery aggregation (ADR-0001) — groups both sides by
         # (po, material), compares summed totals with a qty-AND-amount gate, and
@@ -594,7 +636,7 @@ async def run_reconciliation(
             len(unmatched_erp), len(unmatched_stmt),
         )
         for m in l3_matches:
-            all_results.append(_match_to_result(m, run.id, supplier_id, period))
+            all_results.append(_match_to_result(m, run.id, supplier_id, period, date_tol_days))
 
         # Layer 3.5: aggregate fallback — PO-level cross-material
         # reconciliation on Layer 3's leftovers. Runs AFTER the
@@ -608,7 +650,7 @@ async def run_reconciliation(
             len(l35_matches), len(unmatched_erp), len(unmatched_stmt),
         )
         for m in l35_matches:
-            all_results.append(_match_to_result(m, run.id, supplier_id, period))
+            all_results.append(_match_to_result(m, run.id, supplier_id, period, date_tol_days))
 
         # Layer 4: AI match (if enabled)
         l4_matches = []
@@ -631,7 +673,7 @@ async def run_reconciliation(
                 len(l4_matches), len(unmatched_erp), len(unmatched_stmt),
             )
             for m in l4_matches:
-                all_results.append(_match_to_result(m, run.id, supplier_id, period))
+                all_results.append(_match_to_result(m, run.id, supplier_id, period, date_tol_days))
         else:
             logger.info("[RECON DEBUG] Layer 4 (AI) disabled by config")
 

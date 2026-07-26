@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { ChevronDown, ChevronRight, Check, Flag } from "lucide-react";
+import { ChevronDown, ChevronRight, Check, Flag, FileDown } from "lucide-react";
 import PageHeader from "../components/page-header";
 import { useCurrentOrg, useSignoff, useSuppliers, type ReviewItem, type SupplierReady } from "../lib/swr";
 import { CARD } from "@/app/lib/ui";
@@ -604,9 +604,19 @@ export default function ReconciliationPage() {
       {/* Review queue */}
       {items.length > 0 && !loading && (
         <>
-          <h3 className="text-sm font-semibold mb-3 text-zinc-700">
-            {t("review.queue_title", { name: selectedSupplier?.name || "" })}
-          </h3>
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-zinc-700">
+              {t("review.queue_title", { name: selectedSupplier?.name || "" })}
+            </h3>
+            <a
+              href={`/api/v1/reconciliation/annotated-statement?supplier_id=${supplierId}&period=${period}`}
+              download
+            >
+              <Button size="sm" variant="outline" className="h-8 gap-1.5">
+                <FileDown className="h-3.5 w-3.5" /> {t("review.export_annotated")}
+              </Button>
+            </a>
+          </div>
 
           {/* Progress indicator */}
           <div className={`${CARD} p-4 mb-5`}>

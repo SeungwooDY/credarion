@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     anthropic_api_key: str | None = None
     invoice_upload_dir: str = "uploads/invoices"
+    statement_upload_dir: str = "uploads/statements"
     invoice_ocr_model: str = "claude-haiku-4-5-20251001"
 
     # --- Auth ---

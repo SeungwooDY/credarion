@@ -485,6 +485,7 @@ interface ReconConfig {
   org_id: string;
   qty_tolerance_pct: number;
   price_tolerance_pct: number;
+  date_tolerance_days: number;
   auto_resolve_exact: boolean;
   ai_layer_enabled: boolean;
   ai_max_tokens_per_run: number;

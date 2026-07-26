@@ -10,6 +10,7 @@ import { useT } from "@/app/lib/i18n";
 interface ReconConfigForm {
   qty_tolerance_pct: number;
   price_tolerance_pct: number;
+  date_tolerance_days: number;
   auto_resolve_exact: boolean;
   ai_layer_enabled: boolean;
   ai_max_tokens_per_run: number;
@@ -28,6 +29,7 @@ export default function SettingsPage() {
       setFormConfig({
         qty_tolerance_pct: config.qty_tolerance_pct,
         price_tolerance_pct: config.price_tolerance_pct,
+        date_tolerance_days: config.date_tolerance_days,
         auto_resolve_exact: config.auto_resolve_exact,
         ai_layer_enabled: config.ai_layer_enabled,
         ai_max_tokens_per_run: config.ai_max_tokens_per_run,
@@ -121,6 +123,24 @@ export default function SettingsPage() {
                     setFormConfig({
                       ...formConfig,
                       price_tolerance_pct: parseFloat(e.target.value),
+                    })
+                  }
+                  className="border border-border rounded px-3 py-2 text-sm w-full bg-white"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1">
+                  {t("settings.date_tolerance")}
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={formConfig.date_tolerance_days}
+                  onChange={(e) =>
+                    setFormConfig({
+                      ...formConfig,
+                      date_tolerance_days: parseInt(e.target.value),
                     })
                   }
                   className="border border-border rounded px-3 py-2 text-sm w-full bg-white"
