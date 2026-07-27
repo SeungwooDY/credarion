@@ -461,18 +461,17 @@ export default function ReconciliationPage() {
     if (ids.length === 0) return;
     setBusy(true);
     try {
-      const responses = await Promise.all(
-        ids.map((id) =>
-          fetch(`/api/v1/reconciliation/${id}/approve`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({}),
-          })
-        )
-      );
-      responses.find((r) => handleLocked(r));
-      await loadQueue(supplierId);
-      refreshSuppliers();
+      // One bulk call: with 1,000+ lines/month, per-item requests meant
+      // hundreds of round-trips (and transactions) per Confirm All.
+      const res = await fetch("/api/v1/reconciliation/results/bulk-approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ result_ids: ids }),
+      });
+      if (!handleLocked(res)) {
+        await loadQueue(supplierId);
+        refreshSuppliers();
+      }
     } catch {
       setError(t("review.action_failed"));
     }

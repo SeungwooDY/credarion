@@ -45,6 +45,16 @@ class ApproveRequest(BaseModel):
     note: str | None = None
 
 
+class BulkApproveRequest(BaseModel):
+    """Confirm many pending results in one call (section-level Confirm All).
+
+    Already-reviewed results in the batch are skipped, not an error — two
+    reviewers working the same queue must not 409 each other's batches.
+    """
+    result_ids: list[uuid.UUID]
+    note: str | None = None
+
+
 class RejectRequest(BaseModel):
     """Flag a result as a discrepancy during human review. Reason is required."""
     # Deprecated: reviewer identity now comes from the session; accepted but ignored.
