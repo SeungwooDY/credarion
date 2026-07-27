@@ -20,6 +20,9 @@ interface SideRecord {
   amount: number;
   grn_date?: string | null;
   delivery_date?: string | null;
+  grn_number?: string | null;
+  delivery_note?: string | null;
+  delivery_note_ref?: string | null;
 }
 
 interface GroupDetails {
@@ -585,6 +588,7 @@ function SupplierCard({
                   <th className="text-left px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_issue")}</th>
                   <th className="text-left px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_po")}</th>
                   <th className="text-left px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_date")}</th>
+                  <th className="text-left px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_doc_no")}</th>
                   <th className="text-left px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_part_number")}</th>
                   <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_erp_qty")}</th>
                   <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_stmt_qty")}</th>
@@ -605,6 +609,9 @@ function SupplierCard({
                   const stmtDate = item.statement?.delivery_date?.slice(0, 10);
                   const grnDate = item.erp?.grn_date?.slice(0, 10);
                   const date = stmtDate || grnDate || "-";
+                  const stmtDoc = item.statement?.delivery_note_ref || null;
+                  const grnDoc = item.erp?.grn_number || null;
+                  const docNo = stmtDoc || grnDoc || "-";
                   const isMatch = !item.discrepancy_type;
                   const md = item.match_details;
                   const isGrouped =
@@ -666,6 +673,12 @@ function SupplierCard({
                         title={`${t("mismatches.stmt_label")} ${stmtDate ?? "-"} / ${t("mismatches.erp_label")} ${grnDate ?? "-"}`}
                       >
                         {date}
+                      </td>
+                      <td
+                        className="px-3 py-2 font-mono whitespace-nowrap text-zinc-600 max-w-[140px] truncate"
+                        title={`${t("mismatches.stmt_label")} ${stmtDoc ?? "-"} / ${t("mismatches.erp_label")} ${grnDoc ?? "-"}`}
+                      >
+                        {docNo}
                       </td>
                       <td
                         className="px-3 py-2 font-mono whitespace-nowrap text-zinc-600 max-w-[180px] truncate"
@@ -896,6 +909,7 @@ function buildSpreadsheetColumns(t: TFunction): GridColumn[] {
     { key: "po_number", label: t("mismatches.col_po_number"), width: 120 },
     { key: "part_number", label: t("mismatches.col_part_number"), width: 150 },
     { key: "date", label: t("mismatches.col_date"), width: 100 },
+    { key: "doc_no", label: t("mismatches.col_doc_no"), width: 120 },
     { key: "erp_qty", label: t("mismatches.col_erp_qty"), width: 80, editable: true, type: "number", align: "right" },
     { key: "stmt_qty", label: t("mismatches.col_stmt_qty"), width: 80, editable: true, type: "number", align: "right" },
     { key: "qty_delta", label: t("mismatches.col_qty_delta"), width: 80, align: "right" },
@@ -918,6 +932,7 @@ function supplierToRows(supplier: SupplierMismatch): GridRow[] {
     po_number: item.erp?.po_number || item.statement?.po_number || "",
     part_number: item.erp?.material_number || item.statement?.material_number || "",
     date: item.statement?.delivery_date?.slice(0, 10) || item.erp?.grn_date?.slice(0, 10) || "",
+    doc_no: item.statement?.delivery_note_ref || item.erp?.grn_number || "",
     erp_qty: item.erp?.quantity ?? null,
     stmt_qty: item.statement?.quantity ?? null,
     qty_delta: item.quantity_delta,
