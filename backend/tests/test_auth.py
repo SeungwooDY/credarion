@@ -16,7 +16,7 @@ from app.auth_deps import get_current_user
 from app.db import Base, get_db
 from app.main import app
 from app.models import Account, Organization, User
-from app.security import create_access_token, hash_password
+from app.security import create_access_token, hash_password, password_fingerprint
 
 
 @compiles(JSONB, "sqlite")
@@ -226,3 +226,56 @@ def test_expired_token_is_rejected(client, db_session):
     token = create_access_token(str(user.id), ttl_hours=1, now=0)
     client.cookies.set("credarion_session", token)
     assert client.get("/api/v1/auth/me").status_code == 401
+
+
+def test_token_without_password_binding_rejected(client, db_session):
+    """Session tokens must carry the password fingerprint (pfp) claim —
+    a signed token without it (e.g. minted before the binding existed)
+    must not authenticate."""
+    user, _account, _org = _make_user(db_session)
+    token = create_access_token(str(user.id))  # no pwd_fp
+    client.cookies.set("credarion_session", token)
+    assert client.get("/api/v1/auth/me").status_code == 401
+
+
+def test_password_change_revokes_old_sessions(client, db_session):
+    """Changing the password must invalidate previously issued sessions
+    (stateless revocation via the pfp claim) while re-issuing a fresh
+    cookie so the current session survives."""
+    user, _account, _org = _make_user(db_session)
+    client.post(
+        "/api/v1/auth/login",
+        json={"email": "paying@credarion.test", "password": "hunter2-strong"},
+    )
+    old_token = client.cookies.get("credarion_session")
+    assert old_token
+
+    resp = client.post(
+        "/api/v1/auth/change-password",
+        json={"current_password": "hunter2-strong", "new_password": "even-stronger-9"},
+    )
+    assert resp.status_code == 200, resp.text
+    new_token = client.cookies.get("credarion_session")
+    assert new_token and new_token != old_token
+
+    # The refreshed cookie keeps this session working.
+    assert client.get("/api/v1/auth/me").status_code == 200
+
+    # A stolen/parallel session minted before the change is now dead.
+    client.cookies.set("credarion_session", old_token)
+    assert client.get("/api/v1/auth/me").status_code == 401
+
+
+def test_login_token_bound_to_current_password(client, db_session):
+    """The pfp claim must match the CURRENT stored hash — a token forged
+    against a stale fingerprint fails."""
+    user, _account, _org = _make_user(db_session)
+    stale = create_access_token(str(user.id), pwd_fp=password_fingerprint("scrypt$old"))
+    client.cookies.set("credarion_session", stale)
+    assert client.get("/api/v1/auth/me").status_code == 401
+    # And a correctly bound token works.
+    good = create_access_token(
+        str(user.id), pwd_fp=password_fingerprint(user.hashed_password)
+    )
+    client.cookies.set("credarion_session", good)
+    assert client.get("/api/v1/auth/me").status_code == 200

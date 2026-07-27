@@ -96,6 +96,15 @@ def verify_password(password: str, stored: str) -> bool:
 # ── session tokens (HS256 JWT) ───────────────────────────────────
 
 
+def password_fingerprint(hashed_password: str) -> str:
+    """Short, non-reversible fingerprint of a stored password hash.
+
+    Embedded in session tokens (``pfp`` claim) so that changing the password
+    invalidates every previously issued session — stateless revocation.
+    """
+    return hashlib.sha256(hashed_password.encode("utf-8")).hexdigest()[:16]
+
+
 def _sign(signing_input: bytes) -> str:
     sig = hmac.new(
         settings.auth_secret_key.encode("utf-8"), signing_input, hashlib.sha256
@@ -103,15 +112,25 @@ def _sign(signing_input: bytes) -> str:
     return _b64u_encode(sig)
 
 
-def create_access_token(subject: str, *, ttl_hours: int | None = None, now: int | None = None) -> str:
+def create_access_token(
+    subject: str,
+    *,
+    ttl_hours: int | None = None,
+    now: int | None = None,
+    pwd_fp: str | None = None,
+) -> str:
     """Create a signed session token for ``subject`` (the user id).
 
     ``now`` is injectable for testing; defaults to the current unix time.
+    ``pwd_fp`` binds the token to the user's current password hash (see
+    :func:`password_fingerprint`) so a password change revokes old sessions.
     """
     issued = int(time.time()) if now is None else now
     ttl = settings.auth_token_ttl_hours if ttl_hours is None else ttl_hours
     header = {"alg": "HS256", "typ": "JWT"}
     payload = {"sub": subject, "iat": issued, "exp": issued + ttl * 3600}
+    if pwd_fp is not None:
+        payload["pfp"] = pwd_fp
     segments = [
         _b64u_encode(json.dumps(header, separators=(",", ":")).encode("utf-8")),
         _b64u_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")),

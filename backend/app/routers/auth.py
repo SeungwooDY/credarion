@@ -13,6 +13,7 @@ from app.security import (
     DUMMY_PASSWORD_HASH,
     create_access_token,
     hash_password,
+    password_fingerprint,
     verify_password,
 )
 
@@ -116,7 +117,9 @@ def login(body: LoginRequest, response: Response, db: Session = Depends(get_db))
             detail="Your subscription is not active. Please contact support.",
         )
 
-    token = create_access_token(str(user.id))
+    token = create_access_token(
+        str(user.id), pwd_fp=password_fingerprint(user.hashed_password)
+    )
     _set_session_cookie(response, token)
     return _me_payload(user, db)
 
@@ -142,10 +145,15 @@ class ChangePasswordRequest(BaseModel):
 @router.post("/change-password")
 def change_password(
     body: ChangePasswordRequest,
+    response: Response,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> dict[str, bool]:
-    """Let the logged-in user replace their (possibly temporary) password."""
+    """Let the logged-in user replace their (possibly temporary) password.
+
+    All previously issued sessions are revoked (their tokens are bound to the
+    old password hash); a fresh cookie keeps THIS session logged in.
+    """
     if not verify_password(body.current_password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -157,4 +165,8 @@ def change_password(
         )
     user.hashed_password = hash_password(body.new_password)
     db.commit()
+    token = create_access_token(
+        str(user.id), pwd_fp=password_fingerprint(user.hashed_password)
+    )
+    _set_session_cookie(response, token)
     return {"ok": True}
