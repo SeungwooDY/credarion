@@ -36,6 +36,7 @@ from app.models import (
 from app.reconciliation.orchestrator import run_reconciliation
 from app.reconciliation.schemas import (
     ApproveRequest,
+    BulkApproveRequest,
     BulkResolveRequest,
     ConfigResponse,
     ConfigUpdate,
@@ -688,6 +689,48 @@ def bulk_resolve(
         .all()
     )
     return [_result_to_detail(r) for r in refreshed]
+
+
+@router.post("/results/bulk-approve", response_model=list[ReviewActionResponse])
+def bulk_approve(
+    body: BulkApproveRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[ReviewActionResponse]:
+    """Confirm many pending results in one call (section-level Confirm All).
+
+    Replaces the frontend's one-request-per-item loop: one transaction, one
+    round-trip. Tenant scoping mirrors bulk-resolve; every distinct
+    (supplier, period) is lock-checked before anything mutates. Results that
+    are already confirmed/rejected/resolved are skipped, not an error — two
+    reviewers working the same queue must not fail each other's batches.
+    """
+    q = db.query(ReconciliationResult).filter(
+        ReconciliationResult.id.in_(body.result_ids)
+    )
+    allowed = accessible_supplier_ids(db, user)
+    if allowed is not None:
+        q = q.filter(ReconciliationResult.supplier_id.in_(allowed))
+    results = q.all()
+    # A cross-tenant id filtered out above surfaces here as a count mismatch.
+    if len(results) != len(set(body.result_ids)):
+        raise HTTPException(status_code=404, detail="Some results not found")
+
+    for supplier_id, period in {(r.supplier_id, r.period) for r in results}:
+        ensure_supplier_period_unlocked(db, supplier_id, period)
+
+    now = datetime.utcnow()
+    out: list[ReviewActionResponse] = []
+    for r in results:
+        if r.status == "pending_review":
+            r.status = "confirmed"
+            r.reviewer_id = user.email
+            r.reviewed_at = now
+            if body.note:
+                r.resolution_note = body.note
+        out.append(ReviewActionResponse(id=str(r.id), status=r.status))
+    db.commit()
+    return out
 
 
 @router.get("/summary", response_model=list[SupplierReconciliationSummary])
