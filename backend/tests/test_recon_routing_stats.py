@@ -30,10 +30,12 @@ def _stmt(line_id, po="428759", material="MAT_A", qty="100"):
 class _FakeResult:
     """Bare-attribute stand-in for ReconciliationResult in stats tests."""
 
-    def __init__(self, match_type="exact", statement_line_id=None, discrepancy_type=None):
+    def __init__(self, match_type="exact", statement_line_id=None, discrepancy_type=None,
+                 match_details=None):
         self.match_type = match_type
         self.statement_line_id = statement_line_id
         self.discrepancy_type = discrepancy_type
+        self.match_details = match_details
 
 
 class TestSplitByBalance:
@@ -142,6 +144,18 @@ class TestRunStats:
             _FakeResult(match_type="exact", statement_line_id=uuid.uuid4()),
         ]
         stats = _compute_run_stats(results, total_statement=2)
+        assert stats["auto_match_rate"] == Decimal("100")
+
+    def test_carryover_excluded_from_denominator(self):
+        """Carried-over missing receipts already penalized their origin
+        period — they don't drag the new period's rate down."""
+        results = [
+            _FakeResult(match_type="exact", statement_line_id=uuid.uuid4()),
+            _FakeResult(match_type="unmatched", discrepancy_type="missing_from_statement",
+                        match_details={"carryover_from": "2026-03"}),
+        ]
+        stats = _compute_run_stats(results, total_statement=1)
+        assert stats["unmatched_erp_count"] == 0
         assert stats["auto_match_rate"] == Decimal("100")
 
     def test_unmatched_and_empty_statement(self):

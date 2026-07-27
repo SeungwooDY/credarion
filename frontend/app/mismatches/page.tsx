@@ -28,6 +28,7 @@ interface SideRecord {
 interface GroupDetails {
   role?: string;
   note?: string;
+  carryover_from?: string;
   group_key?: string;
   erp_lines?: number;
   stmt_lines?: number;
@@ -162,7 +163,11 @@ function MatchExplanation({ supplier }: { supplier: SupplierMismatch }) {
   const matchedCount = s.total_statement - s.unmatched_stmt;
   // Two-sided denominator: ERP receipts missing from the statement count
   // against the rate (they're real issues the supplier must re-issue for).
-  const totalToReconcile = s.total_statement + s.unmatched_erp;
+  // Carryover items from prior periods already penalized their own month.
+  const carryoverCount = s.items.filter(
+    (i) => i.discrepancy_type === "missing_from_statement" && i.match_details?.carryover_from
+  ).length;
+  const totalToReconcile = s.total_statement + s.unmatched_erp - carryoverCount;
   const matchPct = s.match_rate ?? 0;
 
   return (
@@ -649,6 +654,14 @@ function SupplierCard({
                           </span>
                         ) : (
                           <DiscrepancyLabel type={item.discrepancy_type} />
+                        )}
+                        {md?.carryover_from && (
+                          <span
+                            className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium text-sky-600 bg-sky-50 border border-sky-200 cursor-help align-middle"
+                            title={t("mismatches.carryover_tooltip", { period: md.carryover_from })}
+                          >
+                            {t("mismatches.carryover_badge", { period: md.carryover_from })}
+                          </span>
                         )}
                         {isGrouped && (
                           <span
