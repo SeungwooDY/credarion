@@ -212,6 +212,52 @@ def test_dashboard_autoselect_scoped_to_account(client_as_a, two_tenants):
     assert str(b["supplier"].id) not in supplier_ids
 
 
+def test_cross_tenant_dashboard_org_id_blocked(client_as_a, two_tenants):
+    """/dashboard takes org_id as a query param — the router-level
+    enforce_org_scope must reject another tenant's org_id."""
+    _, b = two_tenants
+    resp = client_as_a.get(
+        f"/api/v1/reconciliation/dashboard?org_id={b['org'].id}"
+    )
+    assert resp.status_code in (403, 404)
+
+
+def test_cross_tenant_mismatches_blocked(client_as_a, two_tenants):
+    """/mismatches keys everything on the org_id query param; a foreign
+    org_id must be rejected, not silently return that tenant's data."""
+    a, b = two_tenants
+    resp = client_as_a.get(
+        f"/api/v1/reconciliation/mismatches?org_id={b['org'].id}&period={PERIOD}"
+    )
+    assert resp.status_code in (403, 404)
+    # Own org stays accessible.
+    ok = client_as_a.get(
+        f"/api/v1/reconciliation/mismatches?org_id={a['org'].id}&period={PERIOD}"
+    )
+    assert ok.status_code == 200
+
+
+def test_cross_tenant_annotated_statement_blocked(client_as_a, two_tenants):
+    _, b = two_tenants
+    resp = client_as_a.get(
+        "/api/v1/reconciliation/annotated-statement"
+        f"?supplier_id={b['supplier'].id}&period={PERIOD}"
+    )
+    assert resp.status_code in (403, 404)
+
+
+def test_cross_tenant_erp_replace_upload_blocked(client_as_a, two_tenants):
+    """erp upload with replace=true purges stored rows — a foreign org_id
+    must be rejected before any ingestion/purge happens."""
+    _, b = two_tenants
+    resp = client_as_a.post(
+        "/api/v1/erp/upload",
+        data={"org_id": str(b["org"].id), "replace": "true"},
+        files={"file": ("grn.csv", b"col\n1\n", "text/csv")},
+    )
+    assert resp.status_code == 403
+
+
 def test_dashboard_empty_for_account_without_org(db_session: Session, two_tenants):
     """A user whose account has NO organization must see an empty dashboard
     (0/0), not another tenant's suppliers auto-selected as the "first" org."""
