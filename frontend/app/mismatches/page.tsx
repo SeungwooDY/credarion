@@ -612,8 +612,6 @@ function SupplierCard({
                   const docNo = stmtDoc || grnDoc || "-";
                   const isMatch = !item.discrepancy_type;
                   const md = item.match_details;
-                  const isGrouped =
-                    !!md?.group_key && ((md.erp_lines ?? 0) > 1 || (md.stmt_lines ?? 0) > 1);
                   const isUnmatched = item.match_type === "unmatched";
                   const isResolved = item.status === "resolved";
                   const rowBg = isMatch
@@ -654,22 +652,6 @@ function SupplierCard({
                             title={t("mismatches.carryover_tooltip", { period: md.carryover_from })}
                           >
                             {t("mismatches.carryover_badge", { period: md.carryover_from })}
-                          </span>
-                        )}
-                        {isGrouped && (
-                          <span
-                            className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium text-zinc-500 bg-zinc-100 border border-zinc-200 cursor-help align-middle"
-                            title={t("mismatches.group_tooltip", {
-                              erpLines: md?.erp_lines ?? 0,
-                              stmtLines: md?.stmt_lines ?? 0,
-                              erpQty: md?.erp_total_qty ?? "-",
-                              stmtQty: md?.stmt_total_qty ?? "-",
-                            })}
-                          >
-                            {t("mismatches.group_badge", {
-                              erpLines: md?.erp_lines ?? 0,
-                              stmtLines: md?.stmt_lines ?? 0,
-                            })}
                           </span>
                         )}
                       </td>
