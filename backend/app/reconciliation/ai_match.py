@@ -31,7 +31,7 @@ You are given unmatched ERP goods receipt records and supplier statement line it
 Your job is to identify potential matches between them based on contextual clues:
 - Similar PO numbers (with typos, different formatting)
 - Similar material/part numbers
-- Matching quantities or amounts
+- Matching quantities or unit prices
 - Date proximity
 
 Return a JSON array of match objects. Each match object must have:
@@ -184,7 +184,7 @@ async def run_ai_match(
             price_delta = stmt.unit_price - erp.po_price
             amount_delta = stmt.amount - erp.amount
 
-            disc_type = _classify_discrepancy(qty_delta, price_delta, amount_delta)
+            disc_type = _classify_discrepancy(qty_delta, price_delta)
             if disc_type is None:
                 status = "matched"
             else:

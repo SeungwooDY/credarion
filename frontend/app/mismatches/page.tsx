@@ -87,11 +87,6 @@ function formatNum(n: number | null | undefined, decimals = 2): string {
   });
 }
 
-function formatCurrency(n: number | null | undefined): string {
-  if (n == null) return "-";
-  return `¥${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 10 })}`;
-}
-
 function DiscrepancyLabel({ type }: { type: string | null }) {
   const t = useT();
   if (!type) return <span className="text-zinc-300">-</span>;
@@ -600,9 +595,7 @@ function SupplierCard({
                   <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_qty_delta")}</th>
                   <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_erp_price")}</th>
                   <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_stmt_price")}</th>
-                  <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_erp_amt")}</th>
-                  <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_stmt_amt")}</th>
-                  <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_amt_delta")}</th>
+                  <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_price_delta")}</th>
                   <th className="text-center px-3 py-2 font-medium bg-zinc-50">{t("common.status")}</th>
                   <th className="text-center px-3 py-2 font-medium bg-zinc-50 w-20">{t("common.action")}</th>
                 </tr>
@@ -727,15 +720,9 @@ function SupplierCard({
                         )}
                       </td>
                       <td className="px-3 py-2 text-right font-mono">
-                        {item.erp ? formatCurrency(item.erp.amount) : <span className="text-red-300">-</span>}
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono">
-                        {item.statement ? formatCurrency(item.statement.amount) : <span className="text-amber-300">-</span>}
-                      </td>
-                      <td className="px-3 py-2 text-right font-mono">
-                        {item.amount_delta != null ? (
-                          <span className={item.amount_delta !== 0 ? "text-red-600 font-medium" : ""}>
-                            {item.amount_delta > 0 ? "+" : ""}{formatCurrency(item.amount_delta)}
+                        {item.price_delta != null ? (
+                          <span className={item.price_delta !== 0 ? "text-purple-600 font-medium" : ""}>
+                            {item.price_delta > 0 ? "+" : ""}{formatNum(item.price_delta, 2)}
                           </span>
                         ) : (
                           "-"
@@ -929,9 +916,6 @@ function buildSpreadsheetColumns(t: TFunction): GridColumn[] {
     { key: "erp_price", label: t("mismatches.col_erp_price"), width: 90, editable: true, type: "number", align: "right" },
     { key: "stmt_price", label: t("mismatches.col_stmt_price"), width: 90, editable: true, type: "number", align: "right" },
     { key: "price_delta", label: t("mismatches.col_price_delta"), width: 90, align: "right" },
-    { key: "erp_amount", label: t("mismatches.col_erp_amount"), width: 100, editable: true, type: "number", align: "right" },
-    { key: "stmt_amount", label: t("mismatches.col_stmt_amount"), width: 100, editable: true, type: "number", align: "right" },
-    { key: "amt_delta", label: t("mismatches.col_amt_delta"), width: 100, align: "right" },
     { key: "status", label: t("common.status"), width: 90, align: "center" },
     { key: "notes", label: t("mismatches.col_notes"), width: 200, editable: true, type: "text" },
   ];
@@ -952,9 +936,6 @@ function supplierToRows(supplier: SupplierMismatch): GridRow[] {
     erp_price: item.erp?.po_price ?? item.erp?.unit_price ?? null,
     stmt_price: item.statement?.unit_price ?? null,
     price_delta: item.price_delta,
-    erp_amount: item.erp?.amount ?? null,
-    stmt_amount: item.statement?.amount ?? null,
-    amt_delta: item.amount_delta,
     status: item.status,
     notes: item.resolution_note ?? "",
   }));
@@ -967,17 +948,12 @@ function recomputeDeltas(
   const get = (key: string) => edits[key] ?? row[key];
   const erpQty = Number(get("erp_qty")) || 0;
   const stmtQty = Number(get("stmt_qty")) || 0;
-  const erpAmt = Number(get("erp_amount")) || 0;
-  const stmtAmt = Number(get("stmt_amount")) || 0;
   const erpPrice = Number(get("erp_price")) || 0;
   const stmtPrice = Number(get("stmt_price")) || 0;
 
   const out: Record<string, unknown> = {};
   if (edits["erp_qty"] !== undefined || edits["stmt_qty"] !== undefined) {
     out["qty_delta"] = stmtQty - erpQty;
-  }
-  if (edits["erp_amount"] !== undefined || edits["stmt_amount"] !== undefined) {
-    out["amt_delta"] = stmtAmt - erpAmt;
   }
   if (edits["erp_price"] !== undefined || edits["stmt_price"] !== undefined) {
     out["price_delta"] = stmtPrice - erpPrice;

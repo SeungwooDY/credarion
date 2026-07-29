@@ -68,6 +68,23 @@ class TestMultiDeliveryAggregation:
         assert unmatched_erp == []
         assert unmatched_stmt == []
 
+    def test_amount_rounding_difference_still_matches(self):
+        """Group verdict is qty + avg unit price — summed line totals that
+        differ only by per-line rounding do not flag a discrepancy."""
+        erp = [_erp(erp_id=1, qty="300", price="2.5942"),
+               _erp(erp_id=2, qty="700", price="2.5942")]
+        # Supplier rounds each line total to 2dp: totals drift a few fen
+        # while qty and unit price agree exactly.
+        stmt = [_stmt(line_id=1, qty="1000", price="2.5942", amount="2594.20")]
+
+        matches, unmatched_erp, unmatched_stmt = run_multi_delivery_match(erp, stmt)
+
+        assert matches
+        assert all(m.status == "matched" for m in matches)
+        assert all(m.discrepancy_type is None for m in matches)
+        assert unmatched_erp == []
+        assert unmatched_stmt == []
+
     def test_aggregates_both_sides_when_statement_also_split(self):
         """Real pattern: 2 ERP rows (1008+2376) vs 3 stmt lines (1008+1392+984), both sum 3384."""
         erp = [_erp(erp_id=1, qty="1008", price="2.5942"),

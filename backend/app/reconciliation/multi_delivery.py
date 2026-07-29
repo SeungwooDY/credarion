@@ -10,10 +10,12 @@ Layer 3 reconciles that shape by grouping BOTH sides by normalised
 the totals within the same tolerance used by Layers 1 and 2. PO numbers are
 normalised with the same helper Layers 1 and 2 use (`normalize_po_number`).
 
-Status is decided once at the group level:
-  - quantity total AND amount total within tolerance → "matched"
-  - quantity off            → "discrepancy" (quantity_over / quantity_under)
-  - quantity ok, amount off → "discrepancy" (price_higher / price_lower)
+Status is decided once at the group level, on quantity and unit price (average
+per-unit price across the group) — never on summed line totals, which the two
+systems round differently:
+  - quantity total AND avg unit price within tolerance → "matched"
+  - quantity off               → "discrepancy" (quantity_over / quantity_under)
+  - quantity ok, unit price off → "discrepancy" (price_higher / price_lower)
 
 Special case — price drift across deliveries: if the grouped ERP rows do not all
 share the same `po_price`, summing them would hide a real pricing problem, so the
@@ -97,25 +99,30 @@ def _classify_group(
 
     qty_delta = stmt_qty - erp_qty
     amount_delta = stmt_amt - erp_amt
-    price_delta = _avg_price(stmt_amt, stmt_qty) - _avg_price(erp_amt, erp_qty)
+    erp_avg_price = _avg_price(erp_amt, erp_qty)
+    stmt_avg_price = _avg_price(stmt_amt, stmt_qty)
+    price_delta = stmt_avg_price - erp_avg_price
 
+    # The group verdict is decided on quantity and UNIT PRICE (average per-unit
+    # price across the group) — never on the summed line totals, which the two
+    # systems round differently.
     qty_ok = _within_tolerance(erp_qty, stmt_qty, qty_tolerance_pct)
-    amount_ok = _within_tolerance(erp_amt, stmt_amt, price_tolerance_pct)
+    price_ok = _within_tolerance(erp_avg_price, stmt_avg_price, price_tolerance_pct)
     prices_inconsistent = len({e.po_price for e in erp_group}) > 1
 
     if prices_inconsistent:
         # Deliveries priced differently — don't trust the aggregate as a match,
-        # but still surface any real quantity/amount gap alongside the price note.
+        # but still surface any real quantity/price gap alongside the note.
         return "discrepancy", "price_inconsistent", PRICE_INCONSISTENT_NOTE, \
             qty_delta, price_delta, amount_delta
 
-    if qty_ok and amount_ok:
+    if qty_ok and price_ok:
         return "matched", None, None, qty_delta, price_delta, amount_delta
 
     if not qty_ok:
         disc_type = "quantity_over" if qty_delta > 0 else "quantity_under"
     else:
-        disc_type = "price_higher" if amount_delta > 0 else "price_lower"
+        disc_type = "price_higher" if price_delta > 0 else "price_lower"
     return "discrepancy", disc_type, None, qty_delta, price_delta, amount_delta
 
 
@@ -241,7 +248,8 @@ def run_multi_delivery_match(
     """Run Layer 3 multi-delivery aggregation on items left over from Layers 1 & 2.
 
     Groups ERP and statement rows by normalised (po_number, material_number), sums
-    each side, and compares quantity and amount totals within tolerance. ERP groups
+    each side, and compares quantity totals and average unit prices within
+    tolerance. ERP groups
     whose po_price is not consistent are flagged with a price-inconsistency note
     instead of being trusted as a clean aggregate.
 

@@ -25,6 +25,10 @@ from app.reconciliation.exact_match import (
 )
 
 
+def _avg_price(total_amount: Decimal, total_qty: Decimal) -> Decimal:
+    return total_amount / total_qty if total_qty else Decimal("0")
+
+
 def _emit_aggregate_matches(
     erp_group: list[MatchCandidate],
     stmt_group: list[StatementItem],
@@ -44,7 +48,7 @@ def _emit_aggregate_matches(
     delta.
 
     Known debt (deferred per ADR-0001): this fallback still marks every group
-    it accepts as "matched" and its caller gates on qty OR amount — Layer 3
+    it accepts as "matched" and its caller gates on qty OR unit price — Layer 3
     (multi_delivery) runs first with an AND gate and real discrepancies, so
     only PO-level cross-material groups reach here.
     """
@@ -145,12 +149,14 @@ def run_aggregate_match(
     statement_items: list[StatementItem],
     qty_tolerance_pct: Decimal = Decimal("0.50"),
     price_tolerance_pct: Decimal = Decimal("0.50"),
-    amt_tolerance_pct: Decimal = Decimal("1.0"),
 ) -> tuple[list[MatchResult], list[MatchCandidate], list[StatementItem]]:
     """Run aggregate matching on unmatched items.
 
-    Pass 1: Group by PO, compare aggregate totals.
-    Pass 2: Group remaining by PO+material, compare aggregate totals.
+    Groups are accepted on quantity totals and average unit price — summed
+    line totals are never compared (the two systems round them differently).
+
+    Pass 1: Group by PO, compare aggregate qty + avg unit price.
+    Pass 2: Group remaining by PO+material, compare aggregate qty + avg unit price.
 
     Returns:
         (matches, unmatched_erp, unmatched_statement)
@@ -183,9 +189,13 @@ def run_aggregate_match(
         stmt_total_amt = sum(s.amount for s in stmt_group)
 
         qty_ok = _within_tolerance(erp_total_qty, stmt_total_qty, qty_tolerance_pct)
-        amt_ok = _within_tolerance(erp_total_amt, stmt_total_amt, amt_tolerance_pct)
+        price_ok = _within_tolerance(
+            _avg_price(erp_total_amt, erp_total_qty),
+            _avg_price(stmt_total_amt, stmt_total_qty),
+            price_tolerance_pct,
+        )
 
-        if not qty_ok and not amt_ok:
+        if not qty_ok and not price_ok:
             continue
 
         matches.extend(_emit_aggregate_matches(
@@ -224,9 +234,13 @@ def run_aggregate_match(
         stmt_total_amt = sum(s.amount for s in stmt_group)
 
         qty_ok = _within_tolerance(erp_total_qty, stmt_total_qty, qty_tolerance_pct)
-        amt_ok = _within_tolerance(erp_total_amt, stmt_total_amt, amt_tolerance_pct)
+        price_ok = _within_tolerance(
+            _avg_price(erp_total_amt, erp_total_qty),
+            _avg_price(stmt_total_amt, stmt_total_qty),
+            price_tolerance_pct,
+        )
 
-        if not qty_ok and not amt_ok:
+        if not qty_ok and not price_ok:
             continue
 
         matches.extend(_emit_aggregate_matches(

@@ -70,6 +70,21 @@ class TestExactMatch:
         assert len(unmatched_erp) == 0
         assert len(unmatched_stmt) == 0
 
+    def test_amount_rounding_difference_still_matches(self):
+        """Equal qty + unit price match even when the line totals differ.
+
+        The engine matches on unit price only — line totals are derived
+        numbers the two systems round differently.
+        """
+        erp = [_erp(qty="100", price="10.00", amount="1000.00")]
+        stmt = [_stmt(qty="100", price="10.00", amount="1000.37")]
+        matches, _, _ = run_exact_match(erp, stmt)
+        assert len(matches) == 1
+        assert matches[0].status == "matched"
+        assert matches[0].discrepancy_type is None
+        # amount_delta stays informational
+        assert matches[0].amount_delta == Decimal("0.37")
+
     def test_quantity_discrepancy(self):
         erp = [_erp(qty="100")]
         stmt = [_stmt(qty="105")]

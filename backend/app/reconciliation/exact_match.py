@@ -70,11 +70,12 @@ def _normalize_key(po: str | None, material: str | None) -> tuple[str, str] | No
     return (norm_po, material.strip())
 
 
-def _classify_discrepancy(
-    qty_delta: Decimal, price_delta: Decimal, amount_delta: Decimal
-) -> str | None:
+def _classify_discrepancy(qty_delta: Decimal, price_delta: Decimal) -> str | None:
     """Classify discrepancy type based on deltas (statement - ERP).
 
+    Matching is decided on quantity and UNIT PRICE only — line totals are
+    derived numbers that the two systems round differently, so an amount gap
+    with equal qty and unit price is never a discrepancy.
     Reports all inconsistencies found, comma-separated if multiple.
     """
     issues = []
@@ -82,9 +83,6 @@ def _classify_discrepancy(
         issues.append("quantity_over" if qty_delta > 0 else "quantity_under")
     if price_delta != 0:
         issues.append("price_higher" if price_delta > 0 else "price_lower")
-    if amount_delta != 0 and qty_delta == 0 and price_delta == 0:
-        # Amount differs but qty and price don't — rounding or calc issue
-        issues.append("amount_mismatch")
     return ",".join(issues) if issues else None
 
 
@@ -210,15 +208,17 @@ def _build_match(
 ) -> MatchResult:
     """Build a MatchResult with delta and tolerance calculations.
 
-    Any difference in qty, price, or amount is flagged as a discrepancy.
+    Any difference in qty or unit price is flagged as a discrepancy.
     Tolerance is used only to determine confidence level, not to suppress flags.
     """
     qty_delta = stmt.quantity - erp.quantity
     price_delta = stmt.unit_price - erp.po_price
+    # amount_delta is informational only (money-at-risk sums) — it never
+    # drives match/discrepancy status; the engine matches on qty + unit price.
     amount_delta = stmt.amount - erp.amount
 
     # Classify all inconsistencies
-    disc_type = _classify_discrepancy(qty_delta, price_delta, amount_delta)
+    disc_type = _classify_discrepancy(qty_delta, price_delta)
 
     if disc_type is None:
         status = "matched"
