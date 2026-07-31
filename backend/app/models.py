@@ -331,8 +331,9 @@ class ReconciliationResult(Base):
         nullable=True,
     )
 
-    # match_type: exact | near_exact | fuzzy | multi_delivery | aggregate | ai | unmatched
-    #   (multi_po_dn appears in historical rows; retired by ADR-0001)
+    # match_type: exact | near_exact | fuzzy | unmatched
+    #   (multi_delivery / aggregate / multi_po_dn / ai appear in historical
+    #   rows only — aggregation layers retired 2026-07-31, AI is suggest-only)
     match_type: Mapped[str] = mapped_column(String, nullable=False)
     # Unconstrained NUMERIC (migration 0009) — deltas keep full precision.
     quantity_delta: Mapped[Decimal | None] = mapped_column(Numeric, nullable=True)

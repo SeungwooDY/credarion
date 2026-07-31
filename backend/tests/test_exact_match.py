@@ -149,10 +149,8 @@ class TestExactMatch:
     def test_duplicate_po_tiebreaker_by_date(self):
         """When multiple ERP records share PO+PN, pick closest grn_date.
 
-        Note: since ADR-0001, count-imbalanced PO+PN groups are routed to
-        Layer 3 aggregation before L1 runs, so through the orchestrator this
-        tiebreaker only fires for count-BALANCED groups. It remains a valid
-        unit test of run_exact_match itself.
+        The out-of-window candidate (gap 17 days) is excluded by the date
+        gate; the in-window one pairs.
         """
         erp1 = _erp(erp_id=1, grn_date=datetime(2026, 3, 1))
         erp2 = _erp(erp_id=2, grn_date=datetime(2026, 3, 20))
@@ -164,13 +162,78 @@ class TestExactMatch:
         assert len(unmatched_erp) == 1
 
     def test_duplicate_po_tiebreaker_by_delivery_note(self):
-        """Delivery note match takes priority over date proximity."""
+        """Among in-window candidates, a delivery note match beats date proximity."""
         erp1 = _erp(erp_id=1, dn="DN001", grn_date=datetime(2026, 3, 20))
         erp2 = _erp(erp_id=2, dn="DN002", grn_date=datetime(2026, 3, 15))
         stmt = [_stmt(dn_ref="DN002", delivery_date=datetime(2026, 3, 20))]
 
-        matches, _, _ = run_exact_match([erp1, erp2], stmt)
+        matches, _, _ = run_exact_match([erp1, erp2], stmt, date_tolerance_days=10)
         assert matches[0].erp.erp_id == 2  # DN match wins over date
+
+    def test_date_window_gates_pairing_even_with_dn_match(self):
+        """A candidate outside ±date_tolerance_days can never pair — dates
+        are identity fields (2026-07-31) — so the in-window row wins even
+        against delivery-note evidence."""
+        erp1 = _erp(erp_id=1, dn="DN001", grn_date=datetime(2026, 3, 20))
+        erp2 = _erp(erp_id=2, dn="DN002", grn_date=datetime(2026, 3, 15))
+        stmt = [_stmt(dn_ref="DN002", delivery_date=datetime(2026, 3, 20))]
+
+        matches, _, _ = run_exact_match([erp1, erp2], stmt, date_tolerance_days=3)
+        assert matches[0].erp.erp_id == 1
+
+    def test_different_dates_never_pair(self):
+        """Same PO+material+price on both sides, but dates 20 days apart:
+        these are two different receipt events, so both rows surface as
+        missing rather than pairing (and never as an aggregate)."""
+        erp = [_erp(grn_date=datetime(2026, 3, 1))]
+        stmt = [_stmt(delivery_date=datetime(2026, 3, 21))]
+
+        matches, unmatched_erp, unmatched_stmt = run_exact_match(erp, stmt)
+        assert matches == []
+        assert len(unmatched_erp) == 1
+        assert len(unmatched_stmt) == 1
+
+    def test_multi_date_rows_pair_by_date_not_total(self):
+        """Richard's canonical case: two receipt events on different dates
+        pair 1:1 by date; a third supplier claim with no GRN stays unmatched
+        instead of being netted into a group total."""
+        erp = [
+            _erp(erp_id=1, qty="100", grn_date=datetime(2026, 3, 10)),
+            _erp(erp_id=2, qty="50", grn_date=datetime(2026, 3, 20)),
+        ]
+        stmt = [
+            _stmt(line_id=1, qty="100", amount="1000.00", delivery_date=datetime(2026, 3, 10)),
+            _stmt(line_id=2, qty="50", amount="500.00", delivery_date=datetime(2026, 3, 20)),
+            _stmt(line_id=3, qty="30", amount="300.00", delivery_date=datetime(2026, 3, 25)),
+        ]
+
+        matches, unmatched_erp, unmatched_stmt = run_exact_match(erp, stmt)
+        assert len(matches) == 2
+        paired = {(m.erp.erp_id, m.statement.line_id) for m in matches}
+        assert paired == {(1, 1), (2, 2)}
+        assert all(m.status == "matched" for m in matches)
+        assert unmatched_erp == []
+        assert [s.line_id for s in unmatched_stmt] == [3]
+
+    def test_price_mismatch_pass_cannot_steal_clean_counterpart(self):
+        """The identical-price pass runs to completion first, so a line with
+        a price typo pairs with the leftover, not with another line's clean
+        counterpart."""
+        erp = [
+            _erp(erp_id=1, price="10.00", grn_date=datetime(2026, 3, 10)),
+            _erp(erp_id=2, price="12.00", grn_date=datetime(2026, 3, 10)),
+        ]
+        stmt = [
+            _stmt(line_id=1, price="11.00", delivery_date=datetime(2026, 3, 10)),
+            _stmt(line_id=2, price="10.00", delivery_date=datetime(2026, 3, 10)),
+        ]
+
+        matches, _, _ = run_exact_match(erp, stmt)
+        by_stmt = {m.statement.line_id: m for m in matches}
+        assert by_stmt[2].erp.erp_id == 1  # clean price pair
+        assert by_stmt[2].status == "matched"
+        assert by_stmt[1].erp.erp_id == 2  # leftover pairs as price discrepancy
+        assert by_stmt[1].discrepancy_type == "price_lower"
 
     def test_multiple_matches(self):
         erp = [

@@ -1,4 +1,4 @@
-"""Tests for Layer 4: AI matching with mocked Anthropic client."""
+"""Tests for the suggest-only AI layer with mocked Anthropic client."""
 from __future__ import annotations
 
 import json
@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from app.reconciliation.ai_match import run_ai_match
+from app.reconciliation.ai_match import run_ai_suggestions
 from app.reconciliation.exact_match import MatchCandidate, StatementItem
 
 
@@ -44,27 +44,23 @@ def _mock_response(matches_json: list[dict]) -> MagicMock:
     return response
 
 
-class TestAIMatch:
+class TestAISuggestions:
     @pytest.mark.asyncio
     async def test_no_api_key_skips(self):
         """AI layer should gracefully skip when no API key."""
-        erp = [_erp()]
-        stmt = [_stmt()]
-        matches, unmatched_erp, unmatched_stmt = await run_ai_match(
-            erp, stmt, anthropic_api_key=None
+        suggestions = await run_ai_suggestions(
+            [_erp()], [_stmt()], anthropic_api_key=None
         )
-        assert len(matches) == 0
-        assert len(unmatched_erp) == 1
-        assert len(unmatched_stmt) == 1
+        assert suggestions == []
 
     @pytest.mark.asyncio
     async def test_empty_inputs(self):
-        matches, _, _ = await run_ai_match([], [], anthropic_api_key="test-key")
-        assert len(matches) == 0
+        suggestions = await run_ai_suggestions([], [], anthropic_api_key="test-key")
+        assert suggestions == []
 
     @pytest.mark.asyncio
-    async def test_successful_ai_match(self):
-        """AI returns a valid match with high confidence."""
+    async def test_successful_suggestion(self):
+        """AI returns a valid pairing hint — surfaced as a suggestion, not a match."""
         ai_response = [
             {"erp_index": 0, "stmt_index": 0, "confidence": 0.85, "reason": "PO format variant"}
         ]
@@ -74,21 +70,19 @@ class TestAIMatch:
             mock_client.messages.create = AsyncMock(return_value=_mock_response(ai_response))
             mock_anthropic.AsyncAnthropic.return_value = mock_client
 
-            erp = [_erp()]
-            stmt = [_stmt()]
-            matches, unmatched_erp, unmatched_stmt = await run_ai_match(
-                erp, stmt, anthropic_api_key="test-key"
+            suggestions = await run_ai_suggestions(
+                [_erp(erp_id=7)], [_stmt(line_id=9)], anthropic_api_key="test-key"
             )
 
-        assert len(matches) == 1
-        assert matches[0].match_type == "ai"
-        assert matches[0].confidence == Decimal("0.85")
-        assert len(unmatched_erp) == 0
-        assert len(unmatched_stmt) == 0
+        assert len(suggestions) == 1
+        assert suggestions[0]["erp_id"] == 7
+        assert suggestions[0]["stmt_line_id"] == 9
+        assert suggestions[0]["confidence"] == 0.85
+        assert suggestions[0]["reason"] == "PO format variant"
 
     @pytest.mark.asyncio
     async def test_low_confidence_rejected(self):
-        """Matches below 0.7 confidence should be rejected."""
+        """Suggestions below 0.7 confidence should be dropped."""
         ai_response = [
             {"erp_index": 0, "stmt_index": 0, "confidence": 0.5, "reason": "weak match"}
         ]
@@ -98,34 +92,32 @@ class TestAIMatch:
             mock_client.messages.create = AsyncMock(return_value=_mock_response(ai_response))
             mock_anthropic.AsyncAnthropic.return_value = mock_client
 
-            matches, unmatched_erp, unmatched_stmt = await run_ai_match(
+            suggestions = await run_ai_suggestions(
                 [_erp()], [_stmt()], anthropic_api_key="test-key"
             )
 
-        assert len(matches) == 0
-        assert len(unmatched_erp) == 1
+        assert suggestions == []
 
     @pytest.mark.asyncio
     async def test_api_failure_graceful(self):
-        """API errors should not crash — just return all items as unmatched."""
+        """API errors should not crash — just return no suggestions."""
         with patch("app.reconciliation.ai_match.anthropic") as mock_anthropic:
             mock_client = AsyncMock()
             mock_client.messages.create = AsyncMock(side_effect=Exception("API down"))
             mock_anthropic.AsyncAnthropic.return_value = mock_client
 
-            matches, unmatched_erp, unmatched_stmt = await run_ai_match(
+            suggestions = await run_ai_suggestions(
                 [_erp()], [_stmt()], anthropic_api_key="test-key"
             )
 
-        assert len(matches) == 0
-        assert len(unmatched_erp) == 1
-        assert len(unmatched_stmt) == 1
+        assert suggestions == []
 
     @pytest.mark.asyncio
-    async def test_discrepancy_detected(self):
-        """AI match with qty difference should flag discrepancy."""
+    async def test_each_row_suggested_at_most_once(self):
+        """Duplicate index pairs must not produce duplicate suggestions."""
         ai_response = [
-            {"erp_index": 0, "stmt_index": 0, "confidence": 0.80, "reason": "same PO"}
+            {"erp_index": 0, "stmt_index": 0, "confidence": 0.8, "reason": "first"},
+            {"erp_index": 0, "stmt_index": 1, "confidence": 0.9, "reason": "dup erp"},
         ]
 
         with patch("app.reconciliation.ai_match.anthropic") as mock_anthropic:
@@ -133,12 +125,11 @@ class TestAIMatch:
             mock_client.messages.create = AsyncMock(return_value=_mock_response(ai_response))
             mock_anthropic.AsyncAnthropic.return_value = mock_client
 
-            erp = [_erp(quantity=Decimal("100"))]
-            stmt = [_stmt(quantity=Decimal("120"))]
-            matches, _, _ = await run_ai_match(
-                erp, stmt, anthropic_api_key="test-key"
+            suggestions = await run_ai_suggestions(
+                [_erp(erp_id=1)],
+                [_stmt(line_id=1), _stmt(line_id=2)],
+                anthropic_api_key="test-key",
             )
 
-        assert len(matches) == 1
-        assert matches[0].status == "discrepancy"
-        assert matches[0].discrepancy_type == "quantity_over"
+        assert len(suggestions) == 1
+        assert suggestions[0]["reason"] == "first"

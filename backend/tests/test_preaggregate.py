@@ -1,11 +1,15 @@
-"""Statement-side pre-aggregation: combine only when EVERY column matches."""
+"""Identical-row combining (both sides): combine only when PO, material,
+date, and unit price ALL match — quantity is the only field allowed to
+deviate (2026-07-31). The delivery-note ref is deliberately not part of the
+key: two same-day deliveries carry different DNs yet the factory keys them
+as one receipt."""
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
-from app.reconciliation.exact_match import StatementItem
-from app.reconciliation.preaggregate import combine_statement_lines
+from app.reconciliation.exact_match import MatchCandidate, StatementItem
+from app.reconciliation.preaggregate import combine_erp_records, combine_statement_lines
 
 
 def _line(
@@ -90,16 +94,96 @@ class TestKeepSeparate:
         assert len(combined) == 2
         assert groups == {}
 
-    def test_different_delivery_note_ref(self):
-        items = [_line("a"), _line("b", ref="DN-002")]
-        combined, _ = combine_statement_lines(items)
-        assert len(combined) == 2
-
     def test_missing_po_never_combines(self):
         items = [_line("a", po=None), _line("b", po=None)]
         combined, groups = combine_statement_lines(items)
         assert len(combined) == 2
         assert groups == {}
+
+
+class TestDeliveryNoteNotInKey:
+    def test_different_delivery_note_ref_still_combines(self):
+        """Two atomic same-day deliveries have different DNs but the factory
+        keys them as one receipt — so the DN must not split the group."""
+        items = [_line("a"), _line("b", ref="DN-002")]
+        combined, groups = combine_statement_lines(items)
+        assert len(combined) == 1
+        assert groups["a"].line_ids == ["a", "b"]
+
+
+def _receipt(
+    erp_id,
+    po="428759",
+    material="590*5166*8*003",
+    qty="10",
+    price="2.50",
+    amount="25.00",
+    grn_date=datetime(2026, 3, 5, 14, 30),
+    dn="GRN-001",
+) -> MatchCandidate:
+    return MatchCandidate(
+        erp_id=erp_id,
+        po_number=po,
+        material_number=material,
+        quantity=Decimal(qty),
+        po_price=Decimal(price),
+        amount=Decimal(amount),
+        grn_date=grn_date,
+        delivery_note=dn,
+    )
+
+
+class TestCombineErp:
+    def test_identical_receipts_combine(self):
+        """The clerk forgot to key two same-day deliveries as one receipt —
+        ERP-side combining repairs the shape."""
+        records = [_receipt(1), _receipt(2, qty="4", amount="10.00", dn="GRN-002")]
+        combined, groups = combine_erp_records(records)
+
+        assert len(combined) == 1
+        c = combined[0]
+        assert c.erp_id == 1
+        assert c.quantity == Decimal("14")
+        assert c.amount == Decimal("35.00")
+        assert c.po_price == Decimal("2.50")
+        assert groups[1].line_ids == [1, 2]
+
+    def test_time_of_day_does_not_split(self):
+        records = [
+            _receipt(1, grn_date=datetime(2026, 3, 5, 9, 0)),
+            _receipt(2, grn_date=datetime(2026, 3, 5, 16, 45)),
+        ]
+        combined, _ = combine_erp_records(records)
+        assert len(combined) == 1
+
+    def test_different_grn_date_stays_separate(self):
+        records = [_receipt(1), _receipt(2, grn_date=datetime(2026, 3, 6))]
+        combined, groups = combine_erp_records(records)
+        assert len(combined) == 2
+        assert groups == {}
+
+    def test_different_price_stays_separate(self):
+        records = [_receipt(1), _receipt(2, price="2.60", amount="26.00")]
+        combined, groups = combine_erp_records(records)
+        assert len(combined) == 2
+        assert groups == {}
+
+    def test_erp_datetime_combines_with_stmt_date_shape(self):
+        """ERP grn_date (datetime) and statement delivery_date (date) both
+        reduce to a calendar date in the key, so an uncombined ERP pair and
+        the pre-combined statement line meet 1:1 downstream."""
+        from app.reconciliation.exact_match import run_exact_match
+
+        erp_combined, _ = combine_erp_records([
+            _receipt(1, qty="60", amount="150.00"),
+            _receipt(2, qty="40", amount="100.00"),
+        ])
+        stmt = [_line("a", qty="100", amount="250.00")]
+
+        matches, unmatched_erp, unmatched_stmt = run_exact_match(erp_combined, stmt)
+        assert len(matches) == 1
+        assert matches[0].status == "matched"
+        assert not unmatched_erp and not unmatched_stmt
 
 
 class TestPassthrough:

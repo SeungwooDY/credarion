@@ -1,7 +1,8 @@
-"""Tests for the annotated statement export and the date-tolerance window.
+"""Tests for the annotated statement export.
 
 Covers:
-  - _classify_review date-gap handling (match-with-note, never a discrepancy)
+  - _classify_review (date gating moved into the matching layers 2026-07-31 —
+    classification no longer inspects dates)
   - classify_result wording/fill for each result state
   - build_annotated_workbook in both in-place and rebuild modes
   - cleaning keeps ingestor helper columns out of raw_row
@@ -28,7 +29,7 @@ from app.reconciliation.orchestrator import _classify_review
 
 
 # ============================================================
-# Date tolerance (match-with-note)
+# Review classification (date gating now lives in the matching layers)
 # ============================================================
 
 
@@ -51,41 +52,34 @@ def _make_match(grn_date, delivery_date, qty_delta=Decimal("0")) -> MatchResult:
     )
 
 
-class TestDateToleranceClassification:
-    def test_within_window_stays_exact(self):
+class TestReviewClassification:
+    def test_clean_exact_match(self):
         m = _make_match(datetime(2026, 3, 10), date(2026, 3, 12))
-        review = _classify_review(m, date_tolerance_days=3)
+        review = _classify_review(m)
         assert review["match_type"] == "exact"
         assert review["discrepancy_note"] is None
-
-    def test_beyond_window_becomes_match_with_note(self):
-        m = _make_match(datetime(2026, 3, 1), date(2026, 3, 20))
-        review = _classify_review(m, date_tolerance_days=3)
-        assert review["match_type"] == "near_exact"
-        assert review["confidence_label"] == "Match — Date Mismatch"
-        assert "19 days" in review["discrepancy_note"]
-        # A date gap alone is NOT a discrepancy — status stays reviewable.
         assert review["status"] == "pending_review"
 
-    def test_wider_tolerance_suppresses_note(self):
+    def test_dates_never_reclassify(self):
+        """The matching layers refuse to pair rows outside the date window,
+        so classification never sees a wide gap — and no longer reacts to
+        dates at all."""
         m = _make_match(datetime(2026, 3, 1), date(2026, 3, 20))
-        review = _classify_review(m, date_tolerance_days=30)
+        review = _classify_review(m)
         assert review["match_type"] == "exact"
         assert review["discrepancy_note"] is None
 
-    def test_missing_statement_date_ignored(self):
+    def test_missing_statement_date_fine(self):
         m = _make_match(datetime(2026, 3, 1), None)
-        review = _classify_review(m, date_tolerance_days=3)
+        review = _classify_review(m)
         assert review["match_type"] == "exact"
         assert review["discrepancy_note"] is None
 
-    def test_date_note_appended_to_existing_near_exact_note(self):
-        m = _make_match(datetime(2026, 3, 1), date(2026, 3, 20), qty_delta=Decimal("5"))
-        review = _classify_review(m, date_tolerance_days=3)
+    def test_qty_delta_becomes_near_exact_with_note(self):
+        m = _make_match(datetime(2026, 3, 10), date(2026, 3, 10), qty_delta=Decimal("5"))
+        review = _classify_review(m)
         assert review["match_type"] == "near_exact"
-        # Both the qty-delta note and the date note are present.
         assert "Quantity" in review["discrepancy_note"]
-        assert "19 days" in review["discrepancy_note"]
 
 
 # ============================================================

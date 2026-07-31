@@ -1044,11 +1044,13 @@ def list_mismatches(
         erp = erp_map.get(r.erp_record_id) if r.erp_record_id else None
         stmt = stmt_map.get(r.statement_line_id) if r.statement_line_id else None
 
-        # Pre-aggregated statement lines: deltas were computed against the
+        # Pre-combined rows (either side): deltas were computed against the
         # combined totals, so display those rather than the primary raw line.
         md = r.match_details or {}
         stmt_qty = md.get("stmt_combined_qty") if md.get("stmt_combined_lines") else None
         stmt_amt = md.get("stmt_combined_amount") if md.get("stmt_combined_lines") else None
+        erp_qty = md.get("erp_combined_qty") if md.get("erp_combined_lines") else None
+        erp_amt = md.get("erp_combined_amount") if md.get("erp_combined_lines") else None
 
         item = {
             "id": str(r.id),
@@ -1066,9 +1068,9 @@ def list_mismatches(
             "erp": {
                 "po_number": erp.po_number,
                 "material_number": erp.material_number,
-                "quantity": float(erp.quantity),
+                "quantity": float(erp_qty) if erp_qty is not None else float(erp.quantity),
                 "po_price": float(erp.po_price),
-                "amount": float(erp.amount),
+                "amount": float(erp_amt) if erp_amt is not None else float(erp.amount),
                 "grn_date": erp.grn_date.isoformat() if erp.grn_date else None,
                 "grn_number": erp.grn_number,
                 "delivery_note": erp.delivery_note,

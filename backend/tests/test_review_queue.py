@@ -424,20 +424,14 @@ def test_classify_fuzzy():
     assert r["discrepancy_note"] is None
 
 
-def test_classify_aggregate_and_multi_po_dn_share_bucket():
-    for mt in ("aggregate", "multi_po_dn"):
+def test_classify_retired_types_fall_back_to_careful_review():
+    """The aggregation layers and AI matches are retired (2026-07-31) — any
+    unexpected match_type lands in the careful-review fallback bucket."""
+    for mt in ("aggregate", "multi_po_dn", "multi_delivery", "ai"):
         r = orch._classify_review(_match(mt, "0", "0"))
-        assert r["confidence_score"] == 70
-        assert r["confidence_label"] == "Aggregated Match"
-        assert r["sort_priority"] == 4
-
-
-def test_classify_ai_uses_model_confidence():
-    r = orch._classify_review(_match("ai", "0", "0", confidence="0.83"))
-    assert r["match_type"] == "ai"
-    assert r["confidence_score"] == 83
-    assert r["confidence_label"] == "AI Suggested — Careful Review"
-    assert r["sort_priority"] == 5
+        assert r["confidence_score"] == 0
+        assert r["confidence_label"] == "AI Suggested — Careful Review"
+        assert r["sort_priority"] == 5
 
 
 def test_discrepancy_note_exact_spec_format():

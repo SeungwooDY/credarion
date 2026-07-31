@@ -1,7 +1,15 @@
-"""Layer 4: AI-powered matching using Claude Haiku as fallback.
+"""Layer 4: AI-powered suggestions for unmatched rows, using Claude Haiku.
 
-Batches unmatched items and asks Claude to find potential matches
-based on contextual similarity. Only accepts matches with confidence >= 0.7.
+Suggest-only (2026-07-31): the engine matches strictly on identical
+PO + material + unit price + date-within-tolerance, so anything the AI pairs
+has by definition failed that test. Its output is therefore never a match —
+both rows stay unmatched (missing_from_erp / missing_from_statement) and the
+suggestion is attached to them as a "possible counterpart" hint for the
+accountant to confirm or reject. Suggestions never count toward the match
+rate.
+
+Batches unmatched items and asks Claude to find potential pairings based on
+contextual similarity. Only surfaces suggestions with confidence >= 0.7.
 """
 from __future__ import annotations
 
@@ -13,12 +21,7 @@ from typing import Any
 import anthropic
 import httpx
 
-from app.reconciliation.exact_match import (
-    MatchCandidate,
-    MatchResult,
-    StatementItem,
-    _classify_discrepancy,
-)
+from app.reconciliation.exact_match import MatchCandidate, StatementItem
 
 logger = logging.getLogger(__name__)
 
@@ -70,25 +73,25 @@ def _format_stmt_for_prompt(items: list[StatementItem]) -> str:
     return "\n".join(lines)
 
 
-async def run_ai_match(
+async def run_ai_suggestions(
     erp_records: list[MatchCandidate],
     statement_items: list[StatementItem],
-    qty_tolerance_pct: Decimal = Decimal("0.50"),
-    price_tolerance_pct: Decimal = Decimal("0.50"),
     anthropic_api_key: str | None = None,
     max_tokens: int = 10000,
-) -> tuple[list[MatchResult], list[MatchCandidate], list[StatementItem]]:
-    """Run Layer 4 AI matching on remaining unmatched items.
+) -> list[dict[str, Any]]:
+    """Ask Claude for possible pairings among the unmatched leftovers.
 
-    Returns:
-        (matches, unmatched_erp, unmatched_statement)
+    Returns a list of suggestion dicts:
+        {"erp_id", "stmt_line_id", "confidence": float, "reason": str}
+    Each ERP record / statement line appears in at most one suggestion.
+    Nothing is consumed — callers keep every input row as unmatched.
     """
     if not anthropic_api_key:
         logger.info("AI layer skipped: no API key configured")
-        return [], erp_records, statement_items
+        return []
 
     if not erp_records or not statement_items:
-        return [], erp_records, statement_items
+        return []
 
     try:
         client = anthropic.AsyncAnthropic(
@@ -97,11 +100,11 @@ async def run_ai_match(
         )
     except Exception as e:
         logger.warning("AI layer unavailable: %s", e)
-        return [], erp_records, statement_items
+        return []
 
-    all_matches: list[MatchResult] = []
-    matched_erp_ids: set = set()
-    matched_stmt_ids: set = set()
+    suggestions: list[dict[str, Any]] = []
+    suggested_erp_ids: set = set()
+    suggested_stmt_ids: set = set()
     tokens_used = 0
 
     # Process in aligned batches (zip, not cross-product) to avoid O(n*m) API calls.
@@ -115,18 +118,16 @@ async def run_ai_match(
         erp_batch = erp_records[i : i + BATCH_SIZE]
         stmt_batch = statement_items[i : i + BATCH_SIZE]
 
-        # Filter already matched
-        erp_avail = [e for e in erp_batch if e.erp_id not in matched_erp_ids]
-        stmt_avail = [s for s in stmt_batch if s.line_id not in matched_stmt_ids]
-        if not erp_avail or not stmt_avail:
-            continue
+        # Filter already suggested
+        erp_avail = [e for e in erp_batch if e.erp_id not in suggested_erp_ids]
+        stmt_avail = [s for s in stmt_batch if s.line_id not in suggested_stmt_ids]
 
-        # Also include any remaining unmatched from the other side if one side is exhausted
-        if not erp_batch and statement_items:
-            # All ERP batched, grab remaining unmatched ERP
-            erp_avail = [e for e in erp_records if e.erp_id not in matched_erp_ids][:BATCH_SIZE]
-        if not stmt_batch and erp_records:
-            stmt_avail = [s for s in statement_items if s.line_id not in matched_stmt_ids][:BATCH_SIZE]
+        # Also include any remaining rows from the other side if one side's
+        # batches are exhausted
+        if not erp_avail and statement_items:
+            erp_avail = [e for e in erp_records if e.erp_id not in suggested_erp_ids][:BATCH_SIZE]
+        if not stmt_avail and erp_records:
+            stmt_avail = [s for s in statement_items if s.line_id not in suggested_stmt_ids][:BATCH_SIZE]
 
         if not erp_avail or not stmt_avail:
             continue
@@ -174,43 +175,20 @@ async def run_ai_match(
             erp = erp_avail[erp_idx]
             stmt = stmt_avail[stmt_idx]
 
-            if erp.erp_id in matched_erp_ids or stmt.line_id in matched_stmt_ids:
+            if erp.erp_id in suggested_erp_ids or stmt.line_id in suggested_stmt_ids:
                 continue
 
-            matched_erp_ids.add(erp.erp_id)
-            matched_stmt_ids.add(stmt.line_id)
+            suggested_erp_ids.add(erp.erp_id)
+            suggested_stmt_ids.add(stmt.line_id)
 
-            qty_delta = stmt.quantity - erp.quantity
-            price_delta = stmt.unit_price - erp.po_price
-            amount_delta = stmt.amount - erp.amount
-
-            disc_type = _classify_discrepancy(qty_delta, price_delta)
-            if disc_type is None:
-                status = "matched"
-            else:
-                status = "discrepancy"
-
-            all_matches.append(MatchResult(
-                erp=erp,
-                statement=stmt,
-                match_type="ai",
-                quantity_delta=qty_delta,
-                price_delta=price_delta,
-                amount_delta=amount_delta,
-                status=status,
-                discrepancy_type=disc_type,
-                confidence=conf,
-                match_details={
-                    "layer": 4,
-                    "ai_reason": m.get("reason", ""),
-                    "ai_confidence": float(conf),
-                },
-            ))
+            suggestions.append({
+                "erp_id": erp.erp_id,
+                "stmt_line_id": stmt.line_id,
+                "confidence": float(conf),
+                "reason": m.get("reason", ""),
+            })
 
     if batch_count >= MAX_AI_BATCHES:
         logger.info("AI layer hit batch cap (%d), stopping", MAX_AI_BATCHES)
 
-    unmatched_erp = [e for e in erp_records if e.erp_id not in matched_erp_ids]
-    unmatched_stmt = [s for s in statement_items if s.line_id not in matched_stmt_ids]
-
-    return all_matches, unmatched_erp, unmatched_stmt
+    return suggestions

@@ -1,17 +1,15 @@
-"""Integration test: Layer 3 adjudicates a (po, material) group before the
-aggregate fallback can mask it.
+"""Integration tests for the strict matching semantics (2026-07-31).
 
-Guards the reorder that puts the discrepancy-aware Layer 3 ahead of the
-always-"matched" aggregate layer. The scenario sits in the band where the two
-layers disagree: quantities reconcile exactly, but the statement amount is ~0.8%
-high — inside the aggregate layer's 1% amount tolerance (it would mark the group
-"matched") yet outside Layer 3's 0.5% (it flags price_higher).
+A pair requires identical PO + material + unit price with dates inside the
+± window; quantity is the only field allowed to deviate. Rows are combined
+only when ALL key fields are identical (both sides), and leftovers surface
+as missing/extra — group totals are never netted.
 """
 from __future__ import annotations
 
 import asyncio
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 
 import pytest
@@ -62,104 +60,53 @@ def db_session():
     session.close()
 
 
-def _seed_masking_scenario(db: Session) -> Supplier:
-    """One imbalanced (po, material) group: qty reconciles, amount ~0.8% high."""
+def _org_and_supplier(db: Session, vendor_code: str) -> Supplier:
     org = Organization(name="Org", reporting_currency="RMB")
     db.add(org)
     db.flush()
-    sup = Supplier(org_id=org.id, vendor_code="XFY201", name="丰裕达")
+    sup = Supplier(org_id=org.id, vendor_code=vendor_code, name="国威测试")
     db.add(sup)
     db.flush()
     # Disable the AI layer so the test is deterministic / offline.
     db.add(ReconciliationConfig(org_id=org.id, ai_layer_enabled=False))
-
-    # 2 ERP delivery rows, same (po, material), price 10.00 -> qty 1000, amount 10000.
-    for i, q in enumerate([Decimal("600"), Decimal("400")], start=1):
-        db.add(ERPRecord(
-            org_id=org.id, supplier_id=sup.id, po_number="428759",
-            material_number="430*0412*0*001", quantity=q, po_price=Decimal("10.0000"),
-            amount=q * Decimal("10.0000"), currency="RMB", grn_number=f"G{i}",
-            grn_date=datetime(2026, 3, 10 + i), source_file="t.csv", raw_row={},
-        ))
-
-    stmt = SupplierStatement(supplier_id=sup.id, period="2026-03", file_url="f")
-    db.add(stmt)
-    db.flush()
-    # 3 statement lines (imbalanced: 3 > 2) -> qty 1000, unit price 10.08 -> +0.8% amount.
-    for q in (Decimal("300"), Decimal("300"), Decimal("400")):
-        db.add(StatementLineItem(
-            statement_id=stmt.id, po_number="428759", material_number="430*0412*0*001",
-            quantity=q, unit_price=Decimal("10.0800"), amount=q * Decimal("10.0800"),
-            raw_row={},
-        ))
-    db.commit()
     return sup
 
 
-def test_layer3_adjudicates_before_aggregate_fallback(db_session: Session):
-    sup = _seed_masking_scenario(db_session)
-
-    run = asyncio.run(run_reconciliation(sup.id, "2026-03", db_session))
-    assert run.status == "completed"
-
-    results = (
-        db_session.query(ReconciliationResult)
-        .filter(ReconciliationResult.run_id == run.id)
-        .all()
-    )
-    summary = [(r.match_type, r.discrepancy_type) for r in results]
-
-    # Layer 3 must adjudicate this group and flag the 0.8% amount gap...
-    assert any(
-        r.match_type == "multi_delivery" and r.discrepancy_type == "price_higher"
-        for r in results
-    ), f"expected a multi_delivery price_higher discrepancy; got {summary}"
-
-    # ...and it must NOT be silently consumed as an always-matched aggregate row.
-    assert not any(r.match_type == "aggregate" for r in results), \
-        f"group was masked by the aggregate layer; got {summary}"
-
-
-def _seed_erp_heavy_scenario(db: Session) -> Supplier:
-    """Same supplies received across 3 GRN dates vs ONE combined statement line.
-
-    The exact case Richard reported: under the old statement-heavy-only
-    routing, L1's closest-quantity tiebreaker consumed the combined line with
-    a false quantity discrepancy and stranded 2 ERP rows as phantom
-    missing_from_statement.
-    """
-    org = Organization(name="Org", reporting_currency="RMB")
-    db.add(org)
-    db.flush()
-    sup = Supplier(org_id=org.id, vendor_code="GW001", name="国威测试")
-    db.add(sup)
-    db.flush()
-    db.add(ReconciliationConfig(org_id=org.id, ai_layer_enabled=False))
-
-    for i, q in enumerate([Decimal("300"), Decimal("300"), Decimal("400")], start=1):
-        db.add(ERPRecord(
-            org_id=org.id, supplier_id=sup.id, po_number="428800",
-            material_number="430*0500*0*001", quantity=q, po_price=Decimal("5.0000"),
-            amount=q * Decimal("5.0000"), currency="RMB", grn_number=f"G{i}",
-            grn_date=datetime(2026, 3, 5 + i), source_file="t.csv", raw_row={},
-        ))
-
-    stmt = SupplierStatement(supplier_id=sup.id, period="2026-03", file_url="f")
-    db.add(stmt)
-    db.flush()
-    db.add(StatementLineItem(
-        statement_id=stmt.id, po_number="428800", material_number="430*0500*0*001",
-        quantity=Decimal("1000"), unit_price=Decimal("5.0000"),
-        amount=Decimal("5000.0000"), raw_row={},
+def _erp_row(db, sup, grn_no, qty, grn_date, po="428759", material="430*0412*0*001",
+             price="10.0000"):
+    q, p = Decimal(qty), Decimal(price)
+    db.add(ERPRecord(
+        org_id=sup.org_id, supplier_id=sup.id, po_number=po,
+        material_number=material, quantity=q, po_price=p,
+        amount=q * p, currency="RMB", grn_number=grn_no,
+        grn_date=grn_date, source_file="t.csv", raw_row={},
     ))
-    db.commit()
-    return sup
 
 
-def test_erp_heavy_multi_day_deliveries_match_without_phantoms(db_session: Session):
-    """3 GRN rows vs 1 combined statement line reconcile as one matched group:
-    no false discrepancy, no phantom missing_from_statement, rate 100%."""
-    sup = _seed_erp_heavy_scenario(db_session)
+def _stmt_line(db, stmt, qty, delivery_date, po="428759", material="430*0412*0*001",
+               price="10.0000"):
+    q, p = Decimal(qty), Decimal(price)
+    db.add(StatementLineItem(
+        statement_id=stmt.id, po_number=po, material_number=material,
+        quantity=q, unit_price=p, amount=q * p,
+        delivery_date=delivery_date, raw_row={},
+    ))
+
+
+def test_equal_totals_across_dates_are_not_netted(db_session: Session):
+    """ERP has receipts on 3/10 and 3/20; the statement claims 3/10 and 3/25.
+    Group totals agree exactly — the retired aggregation layer would have
+    called this matched. Now the 3/10 rows pair and the two lone-date rows
+    surface as missing on each side."""
+    sup = _org_and_supplier(db_session, "GW001")
+    _erp_row(db_session, sup, "G1", "100", datetime(2026, 3, 10))
+    _erp_row(db_session, sup, "G2", "50", datetime(2026, 3, 20))
+    stmt = SupplierStatement(supplier_id=sup.id, period="2026-03", file_url="f")
+    db_session.add(stmt)
+    db_session.flush()
+    _stmt_line(db_session, stmt, "100", date(2026, 3, 10))
+    _stmt_line(db_session, stmt, "50", date(2026, 3, 25))
+    db_session.commit()
 
     run = asyncio.run(run_reconciliation(sup.id, "2026-03", db_session))
     assert run.status == "completed"
@@ -171,18 +118,81 @@ def test_erp_heavy_multi_day_deliveries_match_without_phantoms(db_session: Sessi
     )
     summary = [(r.match_type, r.status, r.discrepancy_type) for r in results]
 
-    assert all(r.discrepancy_type is None for r in results), \
-        f"false discrepancy on a perfectly reconciling group: {summary}"
-    assert not any(r.match_type == "unmatched" for r in results), \
-        f"phantom unmatched rows: {summary}"
-    assert any(r.match_type == "multi_delivery" for r in results), summary
+    assert not any(r.match_type in ("multi_delivery", "aggregate") for r in results), \
+        f"aggregation layers are retired: {summary}"
 
-    # No row id may appear twice across the run's results.
-    erp_ids = [r.erp_record_id for r in results if r.erp_record_id is not None]
-    stmt_ids = [r.statement_line_id for r in results if r.statement_line_id is not None]
-    assert len(erp_ids) == len(set(erp_ids))
-    assert len(stmt_ids) == len(set(stmt_ids))
+    matched = [r for r in results if r.match_type == "exact"]
+    assert len(matched) == 1 and matched[0].discrepancy_type is None, summary
+    assert sum(
+        1 for r in results if r.discrepancy_type == "missing_from_statement"
+    ) == 1, summary
+    assert sum(
+        1 for r in results if r.discrepancy_type == "missing_from_erp"
+    ) == 1, summary
 
+    # 1 matched stmt line / (2 stmt lines + 1 missing-from-statement) ≈ 33%
+    assert run.matched_count == 1
+    assert run.auto_match_rate == Decimal("33.33")
+
+
+def test_clerk_forgot_to_combine_erp_rows(db_session: Session):
+    """Two same-day, same-price GRN rows vs one combined statement line:
+    ERP-side combining repairs the shape, so the group exact-matches with
+    no phantom unmatched rows and a 100% rate."""
+    sup = _org_and_supplier(db_session, "GW002")
+    _erp_row(db_session, sup, "G1", "600", datetime(2026, 3, 6), po="428800",
+             material="430*0500*0*001", price="5.0000")
+    _erp_row(db_session, sup, "G2", "400", datetime(2026, 3, 6), po="428800",
+             material="430*0500*0*001", price="5.0000")
+    stmt = SupplierStatement(supplier_id=sup.id, period="2026-03", file_url="f")
+    db_session.add(stmt)
+    db_session.flush()
+    _stmt_line(db_session, stmt, "1000", date(2026, 3, 6), po="428800",
+               material="430*0500*0*001", price="5.0000")
+    db_session.commit()
+
+    run = asyncio.run(run_reconciliation(sup.id, "2026-03", db_session))
+    assert run.status == "completed"
+
+    results = (
+        db_session.query(ReconciliationResult)
+        .filter(ReconciliationResult.run_id == run.id)
+        .all()
+    )
+    summary = [(r.match_type, r.status, r.discrepancy_type) for r in results]
+
+    assert len(results) == 1, summary
+    r = results[0]
+    assert r.match_type == "exact" and r.discrepancy_type is None, summary
+    # Combined-group fan-out metadata points back at both raw GRN rows.
+    assert r.match_details.get("erp_combined_lines") == 2
+    assert len(r.match_details.get("erp_combined_line_ids", [])) == 2
+    assert r.match_details.get("erp_combined_qty") == 1000.0
+
+    assert run.total_erp == 1  # combined count, mirroring total_statement
     assert run.discrepancy_count == 0
-    assert run.matched_count == 1  # one distinct statement line verified
+    assert run.matched_count == 1
     assert run.auto_match_rate == Decimal("100")
+
+
+def test_price_mismatch_pairs_as_discrepancy_not_missing(db_session: Session):
+    """Same PO+material+date but a different unit price: the pair is surfaced
+    as a price discrepancy (both sides visible), not as two missing rows."""
+    sup = _org_and_supplier(db_session, "GW003")
+    _erp_row(db_session, sup, "G1", "100", datetime(2026, 3, 12), price="10.0000")
+    stmt = SupplierStatement(supplier_id=sup.id, period="2026-03", file_url="f")
+    db_session.add(stmt)
+    db_session.flush()
+    _stmt_line(db_session, stmt, "100", date(2026, 3, 12), price="10.0800")
+    db_session.commit()
+
+    run = asyncio.run(run_reconciliation(sup.id, "2026-03", db_session))
+    results = (
+        db_session.query(ReconciliationResult)
+        .filter(ReconciliationResult.run_id == run.id)
+        .all()
+    )
+    assert len(results) == 1
+    r = results[0]
+    assert r.discrepancy_type == "price_higher"
+    assert r.erp_record_id is not None and r.statement_line_id is not None

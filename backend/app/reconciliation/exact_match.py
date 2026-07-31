@@ -1,23 +1,35 @@
-"""Layer 1: Exact match on PO number with quantity-based disambiguation.
+"""Layer 1: Strict 1:1 matching on (PO, material, unit price, date).
 
-Strategy:
-  1. Try (po_number, material_number) composite key first
-  2. Fall back to po_number-only with closest-quantity tiebreaker
+Semantics (2026-07-31): quantity is the ONLY field allowed to deviate between
+a paired ERP receipt and statement line. PO number, material number, and unit
+price must be identical, and the dates must agree within the configured
+±date_tolerance_days window. Rows that share PO+material but sit on different
+dates are different receipt events — they are never paired and never summed;
+each surfaces as its own missing/extra discrepancy downstream.
 
-This handles real-world data where ERP and supplier systems use different
-material/part number schemes for the same items.
+Both sides are pre-combined by identical (PO, material, price, date) before
+this layer runs (see preaggregate.py), so matching here is a plain key join:
+
+  Pass A — identical unit price, date within tolerance → matched
+           (a quantity gap becomes a quantity discrepancy on the pair)
+  Pass B — date within tolerance but unit price differs → paired as a
+           price discrepancy so the accountant sees both sides together
+
+Anything left after both passes is genuinely unmatched.
 """
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Callable
 
 from app.ingestion.cleaning import normalize_po_number
 
 logger = logging.getLogger(__name__)
+
+ZERO = Decimal("0")
 
 
 @dataclass
@@ -46,10 +58,8 @@ class StatementItem:
 
 @dataclass
 class MatchResult:
-    # Either side may be None for group-constituent rows emitted by the
-    # aggregation layers (multi_delivery / aggregate): rows consolidated into a
-    # group whose counterpart is the group total, not a single line. 1:1 layers
-    # (exact/fuzzy/AI) always populate both sides.
+    # Either side may be None for unmatched tail rows recorded by the
+    # orchestrator. Matching layers (exact/fuzzy) always populate both sides.
     erp: MatchCandidate | None
     statement: StatementItem | None
     match_type: str
@@ -96,39 +106,123 @@ def _within_tolerance(
     return pct_diff <= tolerance_pct
 
 
-def _pick_best_erp(
-    candidates: list[MatchCandidate], stmt: StatementItem
-) -> MatchCandidate:
-    """Pick the best ERP candidate for a statement item.
+def _date_gap_days(erp: MatchCandidate, stmt: StatementItem) -> int | None:
+    """Whole-day gap between grn_date and delivery_date; None if unknowable."""
+    grn, dd = erp.grn_date, stmt.delivery_date
+    if grn is None or dd is None:
+        return None
+    g = grn.date() if isinstance(grn, datetime) else grn
+    d = dd.date() if isinstance(dd, datetime) else dd
+    if not isinstance(g, date) or not isinstance(d, date):
+        return None
+    return abs((g - d).days)
 
-    Priority:
-      1. Matching delivery note
-      2. Closest quantity (for PO-only matching where many lines share a PO)
-      3. Closest grn_date to statement delivery_date
-      4. First candidate
+
+def _price_equal(erp: MatchCandidate, stmt: StatementItem) -> bool:
+    if erp.po_price is None or stmt.unit_price is None:
+        return erp.po_price is None and stmt.unit_price is None
+    return Decimal(str(stmt.unit_price)) == Decimal(str(erp.po_price))
+
+
+def run_keyed_match(
+    erp_records: list[MatchCandidate],
+    statement_items: list[StatementItem],
+    key_fn: Callable[[str | None, str | None], tuple | None],
+    match_type: str,
+    confidence: Decimal,
+    layer: Any,
+    qty_tolerance_pct: Decimal,
+    price_tolerance_pct: Decimal,
+    date_tolerance_days: int = 3,
+) -> tuple[list[MatchResult], list[MatchCandidate], list[StatementItem]]:
+    """Strict keyed 1:1 matching, shared by the exact and fuzzy layers.
+
+    A statement line may only pair with an ERP receipt whose (PO, material)
+    key matches AND whose date is within ±date_tolerance_days (a missing date
+    on either side is treated as unknown and does not block the pair). Pass A
+    requires an identical unit price; Pass B pairs the remainder as price
+    discrepancies. Candidate preference: matching delivery note, then
+    smallest known date gap, then closest quantity.
+
+    Returns (matches, unmatched_erp, unmatched_statement).
     """
-    if len(candidates) == 1:
-        return candidates[0]
+    erp_by_key: dict[tuple, list[MatchCandidate]] = {}
+    for erp in erp_records:
+        key = key_fn(erp.po_number, erp.material_number)
+        if key is not None:
+            erp_by_key.setdefault(key, []).append(erp)
 
-    # Prefer delivery note match
-    if stmt.delivery_note_ref:
-        for c in candidates:
-            if c.delivery_note and c.delivery_note.strip() == stmt.delivery_note_ref.strip():
-                return c
+    matches: list[MatchResult] = []
+    matched_erp_ids: set = set()
+    paired_stmt_ids: set = set()
 
-    # Composite tiebreaker: quantity difference first, then date proximity
-    def _sort_key(c: MatchCandidate) -> tuple:
-        qty_diff = abs(c.quantity - stmt.quantity) if stmt.quantity is not None else Decimal("0")
-        date_diff = float("inf")
-        if stmt.delivery_date is not None and hasattr(stmt.delivery_date, "timestamp"):
-            try:
-                date_diff = abs((c.grn_date - stmt.delivery_date).total_seconds())
-            except (TypeError, AttributeError):
-                pass
-        return (qty_diff, date_diff)
+    def _candidates(
+        stmt: StatementItem, require_price: bool
+    ) -> list[tuple[MatchCandidate, int | None]]:
+        key = key_fn(stmt.po_number, stmt.material_number)
+        if key is None or key not in erp_by_key:
+            return []
+        out = []
+        for e in erp_by_key[key]:
+            if e.erp_id in matched_erp_ids:
+                continue
+            if require_price and not _price_equal(e, stmt):
+                continue
+            gap = _date_gap_days(e, stmt)
+            if gap is not None and gap > date_tolerance_days:
+                continue
+            out.append((e, gap))
+        return out
 
-    return min(candidates, key=_sort_key)
+    def _pick(
+        cands: list[tuple[MatchCandidate, int | None]], stmt: StatementItem
+    ) -> tuple[MatchCandidate, int | None]:
+        def sort_key(pair: tuple[MatchCandidate, int | None]) -> tuple:
+            e, gap = pair
+            dn_match = 0 if (
+                stmt.delivery_note_ref
+                and e.delivery_note
+                and e.delivery_note.strip() == stmt.delivery_note_ref.strip()
+            ) else 1
+            gap_known = 0 if gap is not None else 1
+            qty_diff = abs((e.quantity or ZERO) - (stmt.quantity or ZERO))
+            return (dn_match, gap_known, gap if gap is not None else 0, qty_diff)
 
+        return min(cands, key=sort_key)
+
+    def _run_pass(require_price: bool, pass_name: str) -> None:
+        for stmt in statement_items:
+            if stmt.line_id in paired_stmt_ids:
+                continue
+            cands = _candidates(stmt, require_price)
+            if not cands:
+                continue
+            erp, gap = _pick(cands, stmt)
+            matched_erp_ids.add(erp.erp_id)
+            paired_stmt_ids.add(stmt.line_id)
+            details: dict[str, Any] = {
+                "layer": layer,
+                "key_type": "po_pn",
+                "pass": pass_name,
+            }
+            if gap is not None:
+                details["date_gap_days"] = gap
+            matches.append(_build_match(
+                erp, stmt, match_type, confidence, details,
+                qty_tolerance_pct, price_tolerance_pct,
+            ))
+
+    # Pass A: identical unit price — the clean pairing.
+    _run_pass(require_price=True, pass_name="price_exact")
+    # Pass B runs only after every line has had a chance at an exact-price
+    # pair, so a price-mismatched line can never steal another line's clean
+    # counterpart.
+    _run_pass(require_price=False, pass_name="price_mismatch")
+
+    unmatched_erp = [e for e in erp_records if e.erp_id not in matched_erp_ids]
+    unmatched_stmt = [s for s in statement_items if s.line_id not in paired_stmt_ids]
+
+    return matches, unmatched_erp, unmatched_stmt
 
 
 def run_exact_match(
@@ -136,65 +230,24 @@ def run_exact_match(
     statement_items: list[StatementItem],
     qty_tolerance_pct: Decimal = Decimal("0.50"),
     price_tolerance_pct: Decimal = Decimal("0.50"),
+    date_tolerance_days: int = 3,
 ) -> tuple[list[MatchResult], list[MatchCandidate], list[StatementItem]]:
-    """Run Layer 1 exact matching.
-
-    Strategy:
-      Pass 1: composite key (po_number, material_number) — highest confidence
-      Pass 2: PO-only key with quantity-based disambiguation — for cross-system
-              material number mismatches
+    """Run Layer 1 strict matching on the normalized (PO, material) key.
 
     Returns:
         (matches, unmatched_erp, unmatched_statement)
     """
-    # Build composite lookup: (po_number, material_number) → candidates
-    erp_composite: dict[tuple[str, str], list[MatchCandidate]] = {}
-    for erp in erp_records:
-        key = _normalize_key(erp.po_number, erp.material_number)
-        if key is not None:
-            erp_composite.setdefault(key, []).append(erp)
-
-    logger.debug(
-        "[L1 DEBUG] Built lookup: %d composite keys from %d ERP records",
-        len(erp_composite), len(erp_records),
+    return run_keyed_match(
+        erp_records,
+        statement_items,
+        key_fn=_normalize_key,
+        match_type="exact",
+        confidence=Decimal("1.0"),
+        layer=1,
+        qty_tolerance_pct=qty_tolerance_pct,
+        price_tolerance_pct=price_tolerance_pct,
+        date_tolerance_days=date_tolerance_days,
     )
-    # Log a few sample keys to help debug key-format mismatches
-    if erp_composite:
-        sample_composite = list(erp_composite.keys())[:3]
-        logger.debug("[L1 DEBUG] Sample ERP composite keys (PO, PN): %s", sample_composite)
-    if statement_items:
-        sample_stmt_keys = [
-            _normalize_key(s.po_number, s.material_number)
-            for s in statement_items[:3]
-        ]
-        logger.debug("[L1 DEBUG] Sample stmt composite keys (PO, PN): %s", sample_stmt_keys)
-
-    matches: list[MatchResult] = []
-    matched_erp_ids: set = set()
-    unmatched_stmt: list[StatementItem] = []
-
-    # --- Strict PO+PN matching ---
-    for stmt in statement_items:
-        key = _normalize_key(stmt.po_number, stmt.material_number)
-        if key is not None and key in erp_composite:
-            available = [e for e in erp_composite[key] if e.erp_id not in matched_erp_ids]
-            if available:
-                erp = _pick_best_erp(available, stmt)
-                matched_erp_ids.add(erp.erp_id)
-                matches.append(_build_match(erp, stmt, "exact", Decimal("1.0"),
-                    {"layer": 1, "key_type": "po_pn", "po": key[0], "pn": key[1]},
-                    qty_tolerance_pct, price_tolerance_pct))
-                continue
-        unmatched_stmt.append(stmt)
-
-    unmatched_erp = [e for e in erp_records if e.erp_id not in matched_erp_ids]
-
-    logger.debug(
-        "[L1 DEBUG] Results: %d matched, %d ERP unmatched, %d stmt unmatched",
-        len(matches), len(unmatched_erp), len(unmatched_stmt),
-    )
-
-    return matches, unmatched_erp, unmatched_stmt
 
 
 def _build_match(
