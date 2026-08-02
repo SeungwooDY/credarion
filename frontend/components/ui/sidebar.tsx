@@ -147,10 +147,10 @@ export function SessionNavBar() {
       >
         <motion.ul variants={staggerVariants} className="flex h-full flex-col">
           <div className="flex grow flex-col items-center">
-            {/* Brand wordmark — collapses to "C", expands to "Credarion" */}
+            {/* Brand wordmark — collapses to the logo mark, expands to "Credarion" */}
             <div className="flex h-[54px] w-full shrink-0 items-center border-b border-border px-3">
               <Link href="/" className="flex w-full items-center gap-2">
-                <span className="text-lg font-bold text-accent">C</span>
+                <img src="/logo.png" alt="Credarion" className="h-5 w-5 shrink-0" />
                 <motion.li variants={variants} className="list-none">
                   {!isCollapsed && (
                     <span className="text-[15px] font-semibold tracking-tight text-foreground">
