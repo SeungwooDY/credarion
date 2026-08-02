@@ -177,11 +177,14 @@ export default function DashboardPage() {
   const matchedPct = total > 0 ? (matched / total) * 100 : 0;
 
   // Red flags only: the queue surfaces suppliers with confirmed discrepancies
-  // or failed runs. Pending/in-review suppliers still appear in the overview
-  // table below.
+  // or failed runs.
   const queue = suppliers.filter(
     (s) => s.status === "discrepancy" || s.status === "error"
   );
+
+  // The overview table hides suppliers whose statement hasn't been uploaded
+  // yet ("pending") — they still count toward the stat-card totals above.
+  const overviewRows = suppliers.filter((s) => s.status !== "pending");
 
   // Month-end close pipeline. Supplier Reconciliation is the live stage (shows
   // matched/total); the rest unlock sequentially and stay "Not Started" for now.
@@ -440,7 +443,7 @@ export default function DashboardPage() {
                     </tr>
                   ))
                 ) : (
-                  suppliers.map((s) => {
+                  overviewRows.map((s) => {
                     const hasDiscrepancy = (s.discrepancy_value ?? 0) > 0;
                     return (
                       <tr
