@@ -93,11 +93,11 @@ def _stmt_line(db, stmt, qty, delivery_date, po="428759", material="430*0412*0*0
     ))
 
 
-def test_equal_totals_across_dates_are_not_netted(db_session: Session):
+def test_rows_pair_across_dates(db_session: Session):
     """ERP has receipts on 3/10 and 3/20; the statement claims 3/10 and 3/25.
-    Group totals agree exactly — the retired aggregation layer would have
-    called this matched. Now the 3/10 rows pair and the two lone-date rows
-    surface as missing on each side."""
+    Date is not a match criterion (2026-08-02): the 3/10 rows pair by closest
+    date and the 3/20 receipt pairs with the 3/25 claim — same PO, material,
+    qty, and price recorded on different dates is still the same receipt."""
     sup = _org_and_supplier(db_session, "GW001")
     _erp_row(db_session, sup, "G1", "100", datetime(2026, 3, 10))
     _erp_row(db_session, sup, "G2", "50", datetime(2026, 3, 20))
@@ -122,17 +122,11 @@ def test_equal_totals_across_dates_are_not_netted(db_session: Session):
         f"aggregation layers are retired: {summary}"
 
     matched = [r for r in results if r.match_type == "exact"]
-    assert len(matched) == 1 and matched[0].discrepancy_type is None, summary
-    assert sum(
-        1 for r in results if r.discrepancy_type == "missing_from_statement"
-    ) == 1, summary
-    assert sum(
-        1 for r in results if r.discrepancy_type == "missing_from_erp"
-    ) == 1, summary
+    assert len(matched) == 2, summary
+    assert all(r.discrepancy_type is None for r in matched), summary
 
-    # 1 matched stmt line / (2 stmt lines + 1 missing-from-statement) ≈ 33%
-    assert run.matched_count == 1
-    assert run.auto_match_rate == Decimal("33.33")
+    assert run.matched_count == 2
+    assert run.auto_match_rate == Decimal("100.00")
 
 
 def test_clerk_forgot_to_combine_erp_rows(db_session: Session):

@@ -170,28 +170,39 @@ class TestExactMatch:
         matches, _, _ = run_exact_match([erp1, erp2], stmt, date_tolerance_days=10)
         assert matches[0].erp.erp_id == 2  # DN match wins over date
 
-    def test_date_window_gates_pairing_even_with_dn_match(self):
-        """A candidate outside ±date_tolerance_days can never pair — dates
-        are identity fields (2026-07-31) — so the in-window row wins even
-        against delivery-note evidence."""
+    def test_delivery_note_match_beats_closer_date(self):
+        """Date never disqualifies a candidate (2026-08-02); it only ranks
+        them, and delivery-note evidence outranks date proximity."""
         erp1 = _erp(erp_id=1, dn="DN001", grn_date=datetime(2026, 3, 20))
         erp2 = _erp(erp_id=2, dn="DN002", grn_date=datetime(2026, 3, 15))
         stmt = [_stmt(dn_ref="DN002", delivery_date=datetime(2026, 3, 20))]
 
-        matches, _, _ = run_exact_match([erp1, erp2], stmt, date_tolerance_days=3)
-        assert matches[0].erp.erp_id == 1
+        matches, _, _ = run_exact_match([erp1, erp2], stmt)
+        assert matches[0].erp.erp_id == 2
 
-    def test_different_dates_never_pair(self):
-        """Same PO+material+price on both sides, but dates 20 days apart:
-        these are two different receipt events, so both rows surface as
-        missing rather than pairing (and never as an aggregate)."""
+    def test_different_dates_still_pair(self):
+        """Same PO+material+qty+price but dates 20 days apart: the two
+        systems record the same receipt on different dates, so the pair
+        matches — date is not a match criterion."""
         erp = [_erp(grn_date=datetime(2026, 3, 1))]
         stmt = [_stmt(delivery_date=datetime(2026, 3, 21))]
 
         matches, unmatched_erp, unmatched_stmt = run_exact_match(erp, stmt)
-        assert matches == []
-        assert len(unmatched_erp) == 1
-        assert len(unmatched_stmt) == 1
+        assert len(matches) == 1
+        assert matches[0].status == "matched"
+        assert unmatched_erp == []
+        assert unmatched_stmt == []
+
+    def test_closest_date_breaks_ties(self):
+        """With two otherwise-identical ERP candidates, the one with the
+        smaller date gap pairs first."""
+        erp1 = _erp(erp_id=1, grn_date=datetime(2026, 3, 2))
+        erp2 = _erp(erp_id=2, grn_date=datetime(2026, 3, 17))
+        stmt = [_stmt(delivery_date=datetime(2026, 3, 16))]
+
+        matches, unmatched_erp, _ = run_exact_match([erp1, erp2], stmt)
+        assert matches[0].erp.erp_id == 2
+        assert [e.erp_id for e in unmatched_erp] == [1]
 
     def test_multi_date_rows_pair_by_date_not_total(self):
         """Richard's canonical case: two receipt events on different dates

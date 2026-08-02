@@ -1,19 +1,20 @@
-"""Layer 1: Strict 1:1 matching on (PO, material, unit price, date).
+"""Layer 1: Strict 1:1 matching on (PO, material, unit price).
 
-Semantics (2026-07-31): quantity is the ONLY field allowed to deviate between
+Semantics (2026-08-02): quantity is the ONLY field allowed to deviate between
 a paired ERP receipt and statement line. PO number, material number, and unit
-price must be identical, and the dates must agree within the configured
-±date_tolerance_days window. Rows that share PO+material but sit on different
-dates are different receipt events — they are never paired and never summed;
-each surfaces as its own missing/extra discrepancy downstream.
+price must be identical. Date is NOT a match criterion — the two systems
+record the same receipt on different dates (statement vs GRN posting), so a
+date gap never blocks a pair. Date is used only to rank otherwise-equal
+candidates (closest date wins) and, upstream, to combine same-day rows before
+matching (see preaggregate.py).
 
 Both sides are pre-combined by identical (PO, material, price, date) before
-this layer runs (see preaggregate.py), so matching here is a plain key join:
+this layer runs, so matching here is a plain key join:
 
-  Pass A — identical unit price, date within tolerance → matched
+  Pass A — identical unit price → matched
            (a quantity gap becomes a quantity discrepancy on the pair)
-  Pass B — date within tolerance but unit price differs → paired as a
-           price discrepancy so the accountant sees both sides together
+  Pass B — unit price differs → paired as a price discrepancy so the
+           accountant sees both sides together
 
 Anything left after both passes is genuinely unmatched.
 """
@@ -137,12 +138,12 @@ def run_keyed_match(
 ) -> tuple[list[MatchResult], list[MatchCandidate], list[StatementItem]]:
     """Strict keyed 1:1 matching, shared by the exact and fuzzy layers.
 
-    A statement line may only pair with an ERP receipt whose (PO, material)
-    key matches AND whose date is within ±date_tolerance_days (a missing date
-    on either side is treated as unknown and does not block the pair). Pass A
-    requires an identical unit price; Pass B pairs the remainder as price
-    discrepancies. Candidate preference: matching delivery note, then
-    smallest known date gap, then closest quantity.
+    A statement line may pair with any ERP receipt whose (PO, material) key
+    matches. Date never blocks a pair (date_tolerance_days is retained for
+    config compatibility but no longer filters candidates); it only ranks
+    them. Pass A requires an identical unit price; Pass B pairs the
+    remainder as price discrepancies. Candidate preference: matching
+    delivery note, then smallest known date gap, then closest quantity.
 
     Returns (matches, unmatched_erp, unmatched_statement).
     """
@@ -168,10 +169,7 @@ def run_keyed_match(
                 continue
             if require_price and not _price_equal(e, stmt):
                 continue
-            gap = _date_gap_days(e, stmt)
-            if gap is not None and gap > date_tolerance_days:
-                continue
-            out.append((e, gap))
+            out.append((e, _date_gap_days(e, stmt)))
         return out
 
     def _pick(
