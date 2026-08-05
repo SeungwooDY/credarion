@@ -102,9 +102,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         {/* Brand */}
         <div className="mb-8 flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#7c4dff] via-accent to-accent-dark text-sm font-bold text-white">
-            C
-          </div>
+          <img src="/logo.png" alt="Credarion" className="h-9 w-9 shrink-0" />
           <div>
             <h1 className="text-base font-semibold tracking-tight text-foreground">
               Credarion
