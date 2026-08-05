@@ -48,6 +48,9 @@ interface MismatchItem {
   amount_delta: number | null;
   confidence: number | null;
   resolution_note: string | null;
+  marked_discrepancy_reason: string | null;
+  marked_discrepancy_by?: string | null;
+  marked_discrepancy_at?: string | null;
   match_details?: GroupDetails | null;
   erp: SideRecord | null;
   statement: SideRecord | null;
@@ -338,11 +341,87 @@ function ResolveModal({
   );
 }
 
+function MarkDiscrepancyModal({
+  item,
+  onClose,
+  onMarked,
+}: {
+  item: MismatchItem;
+  onClose: () => void;
+  onMarked: () => void;
+}) {
+  const t = useT();
+  const [reason, setReason] = useState(item.marked_discrepancy_reason ?? "");
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleMark() {
+    if (!reason.trim()) return;
+    setSubmitting(true);
+    try {
+      const res = await fetch(`/api/v1/reconciliation/results/${item.id}/mark-discrepancy`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: reason.trim() }),
+      });
+      if (res.ok) onMarked();
+    } catch {
+      // non-fatal; user can retry
+    }
+    setSubmitting(false);
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-card rounded-2xl shadow-xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-semibold text-sm mb-3">{t("mismatches.mark_discrepancy")}</h3>
+        <div>
+          <label className="block text-xs font-medium text-zinc-500 mb-1">{t("mismatches.mark_reason")}</label>
+          <textarea
+            autoFocus
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                handleMark();
+              }
+            }}
+            placeholder={t("mismatches.mark_reason_placeholder")}
+            className="w-full border border-border rounded-lg px-3 py-2 text-sm h-20 resize-none focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
+          />
+          <div className="mt-1 text-[10px] text-zinc-400">{t("mismatches.mark_reason_hint")}</div>
+        </div>
+        <div className="flex gap-2 mt-4 justify-end">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted transition-colors"
+          >
+            {t("common.cancel")}
+          </button>
+          <RippleButton
+            variant="hover"
+            hoverRippleColor="#D97706"
+            onClick={handleMark}
+            disabled={!reason.trim() || submitting}
+            className="!px-3 !py-1.5 !text-xs !rounded-lg text-amber-700 font-medium"
+          >
+            <span className="flex items-center gap-1.5">
+              <span aria-hidden>⚑</span>
+              {submitting ? t("mismatches.marking") : t("mismatches.mark_discrepancy")}
+            </span>
+          </RippleButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SupplierCard({
   supplier,
   expanded,
   onToggle,
-  onItemsResolved,
+  onItemsChanged,
   orgId,
   period,
   locked,
@@ -350,7 +429,7 @@ function SupplierCard({
   supplier: SupplierMismatch;
   expanded: boolean;
   onToggle: () => void;
-  onItemsResolved: (resolvedIds: string[]) => void;
+  onItemsChanged: () => void;
   orgId: string;
   period: string;
   locked: boolean;
@@ -360,8 +439,20 @@ function SupplierCard({
   const [filter, setFilter] = useState<FilterType>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [resolveItems, setResolveItems] = useState<MismatchItem[] | null>(null);
+  const [markItem, setMarkItem] = useState<MismatchItem | null>(null);
   const [escalateItem, setEscalateItem] = useState<MismatchItem | null>(null);
   const [escalatedOk, setEscalatedOk] = useState(false);
+
+  async function unmarkDiscrepancy(item: MismatchItem) {
+    try {
+      const res = await fetch(`/api/v1/reconciliation/results/${item.id}/mark-discrepancy`, {
+        method: "DELETE",
+      });
+      if (res.ok) onItemsChanged();
+    } catch {
+      // non-fatal; user can retry
+    }
+  }
 
   const matchColor =
     s.match_rate == null
@@ -597,7 +688,7 @@ function SupplierCard({
                   <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_stmt_price")}</th>
                   <th className="text-right px-3 py-2 font-medium bg-zinc-50">{t("mismatches.col_price_delta")}</th>
                   <th className="text-center px-3 py-2 font-medium bg-zinc-50">{t("common.status")}</th>
-                  <th className="text-center px-3 py-2 font-medium bg-zinc-50 w-20">{t("common.action")}</th>
+                  <th className="text-center px-3 py-2 font-medium bg-zinc-50 w-24">{t("common.action")}</th>
                 </tr>
               </thead>
               <tbody>
@@ -645,6 +736,15 @@ function SupplierCard({
                           </span>
                         ) : (
                           <DiscrepancyLabel type={item.discrepancy_type} />
+                        )}
+                        {item.marked_discrepancy_reason && (
+                          <span
+                            className="ml-1 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-300 cursor-help align-middle"
+                            title={item.marked_discrepancy_reason}
+                          >
+                            <span aria-hidden>⚑</span>
+                            {t("mismatches.marked_badge")}
+                          </span>
                         )}
                         {md?.carryover_from && (
                           <span
@@ -724,12 +824,33 @@ function SupplierCard({
                       </td>
                       <td className="px-3 py-2 text-center">
                         {!isResolved && !isMatch && (
-                          <button
-                            onClick={() => setResolveItems([item])}
-                            className="px-2 py-0.5 text-xs text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
-                          >
-                            {t("common.resolve")}
-                          </button>
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={() => setResolveItems([item])}
+                              className="px-2 py-0.5 text-xs text-green-600 hover:text-green-800 hover:bg-green-50 rounded-lg transition-colors"
+                            >
+                              {t("common.resolve")}
+                            </button>
+                            {item.marked_discrepancy_reason ? (
+                              <button
+                                onClick={() => unmarkDiscrepancy(item)}
+                                disabled={locked}
+                                title={locked ? t("lock.action_blocked") : t("mismatches.unmark_tooltip")}
+                                className="px-1.5 py-0.5 text-xs text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <span aria-hidden>⚑</span>
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => setMarkItem(item)}
+                                disabled={locked}
+                                title={locked ? t("lock.action_blocked") : t("mismatches.mark_discrepancy")}
+                                className="px-1.5 py-0.5 text-xs text-zinc-300 hover:text-amber-700 hover:bg-amber-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                              >
+                                <span aria-hidden>⚑</span>
+                              </button>
+                            )}
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -757,10 +878,17 @@ function SupplierCard({
         <ResolveModal
           items={resolveItems}
           onClose={() => setResolveItems(null)}
-          onResolved={(ids) => {
-            onItemsResolved(ids);
+          onResolved={() => {
+            onItemsChanged();
             setSelected(new Set());
           }}
+        />
+      )}
+      {markItem && (
+        <MarkDiscrepancyModal
+          item={markItem}
+          onClose={() => setMarkItem(null)}
+          onMarked={onItemsChanged}
         />
       )}
       {escalateItem && (
@@ -906,7 +1034,9 @@ function buildSpreadsheetColumns(t: TFunction): GridColumn[] {
 function supplierToRows(supplier: SupplierMismatch): GridRow[] {
   return supplier.items.map((item) => ({
     id: item.id,
-    flag: "",
+    // Rows marked as discrepancies arrive pre-flagged; their reason shares the
+    // Notes column with any resolution note so the export carries both.
+    flag: item.marked_discrepancy_reason ? "flagged" : "",
     discrepancy: item.discrepancy_type ?? "",
     po_number: item.erp?.po_number || item.statement?.po_number || "",
     part_number: item.erp?.material_number || item.statement?.material_number || "",
@@ -919,7 +1049,9 @@ function supplierToRows(supplier: SupplierMismatch): GridRow[] {
     stmt_price: item.statement?.unit_price ?? null,
     price_delta: item.price_delta,
     status: item.status,
-    notes: item.resolution_note ?? "",
+    notes: [item.marked_discrepancy_reason, item.resolution_note]
+      .filter(Boolean)
+      .join(" · "),
   }));
 }
 
@@ -1163,7 +1295,7 @@ export default function MismatchesPage() {
     setExpanded(new Set());
   }
 
-  function handleItemsResolved(resolvedIds: string[]) {
+  function handleItemsChanged() {
     refreshMismatches();
   }
 
@@ -1319,7 +1451,7 @@ export default function MismatchesPage() {
               supplier={supplier}
               expanded={expanded.has(supplier.supplier_id)}
               onToggle={() => toggleExpand(supplier.supplier_id)}
-              onItemsResolved={handleItemsResolved}
+              onItemsChanged={handleItemsChanged}
               orgId={orgId}
               period={period}
               locked={locked}

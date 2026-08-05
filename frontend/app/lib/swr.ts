@@ -257,6 +257,9 @@ interface MismatchItem {
   amount_delta: number | null;
   confidence: number | null;
   resolution_note: string | null;
+  marked_discrepancy_reason: string | null;
+  marked_discrepancy_by?: string | null;
+  marked_discrepancy_at?: string | null;
   match_details?: Record<string, unknown> | null;
   erp: SideRecord | null;
   statement: SideRecord | null;

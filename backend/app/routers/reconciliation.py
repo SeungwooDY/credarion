@@ -40,6 +40,7 @@ from app.reconciliation.schemas import (
     BulkResolveRequest,
     ConfigResponse,
     ConfigUpdate,
+    MarkDiscrepancyRequest,
     ReconciliationRunRequest,
     ReconciliationRunResponse,
     RejectRequest,
@@ -116,6 +117,9 @@ def _result_to_detail(r: ReconciliationResult) -> ResultDetail:
         resolution_note=r.resolution_note,
         resolved_by=r.resolved_by,
         resolved_at=r.resolved_at,
+        marked_discrepancy_reason=r.marked_discrepancy_reason,
+        marked_discrepancy_by=r.marked_discrepancy_by,
+        marked_discrepancy_at=r.marked_discrepancy_at,
         match_details=r.match_details,
         created_at=r.created_at,
     )
@@ -650,6 +654,59 @@ def resolve_result(
     return _result_to_detail(r)
 
 
+@router.put("/results/{result_id}/mark-discrepancy", response_model=ResultDetail)
+def mark_discrepancy(
+    result_id: uuid.UUID,
+    body: MarkDiscrepancyRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ResultDetail:
+    """Mark a mismatch as a confirmed discrepancy with a required reason.
+
+    Orthogonal to resolve: the row stays open, but carries the reviewer's
+    explanation, which the mismatch spreadsheet export surfaces in its Notes
+    column. Re-marking overwrites the previous reason.
+    """
+    reason = body.reason.strip()
+    if not reason:
+        raise HTTPException(status_code=422, detail="Reason is required")
+    r = db.query(ReconciliationResult).filter(ReconciliationResult.id == result_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Result not found")
+    authorize_supplier(db, user, r.supplier_id)
+    ensure_result_period_unlocked(db, r)
+    if not r.discrepancy_type:
+        raise HTTPException(status_code=400, detail="Result is not a discrepancy")
+
+    r.marked_discrepancy_reason = reason
+    r.marked_discrepancy_by = user.email
+    r.marked_discrepancy_at = datetime.utcnow()
+    db.commit()
+    db.refresh(r)
+    return _result_to_detail(r)
+
+
+@router.delete("/results/{result_id}/mark-discrepancy", response_model=ResultDetail)
+def unmark_discrepancy(
+    result_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ResultDetail:
+    """Remove a discrepancy mark (mistaken clicks must be reversible)."""
+    r = db.query(ReconciliationResult).filter(ReconciliationResult.id == result_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Result not found")
+    authorize_supplier(db, user, r.supplier_id)
+    ensure_result_period_unlocked(db, r)
+
+    r.marked_discrepancy_reason = None
+    r.marked_discrepancy_by = None
+    r.marked_discrepancy_at = None
+    db.commit()
+    db.refresh(r)
+    return _result_to_detail(r)
+
+
 @router.post("/results/bulk-resolve", response_model=list[ResultDetail])
 def bulk_resolve(
     body: BulkResolveRequest,
@@ -1062,6 +1119,11 @@ def list_mismatches(
             "amount_delta": float(r.amount_delta) if r.amount_delta is not None else None,
             "confidence": float(r.confidence) if r.confidence is not None else None,
             "resolution_note": r.resolution_note,
+            "marked_discrepancy_reason": r.marked_discrepancy_reason,
+            "marked_discrepancy_by": r.marked_discrepancy_by,
+            "marked_discrepancy_at": (
+                r.marked_discrepancy_at.isoformat() if r.marked_discrepancy_at else None
+            ),
             # Aggregation-group context (layer 3/3.5): role, group_key, line
             # counts and group totals — lets the UI explain group-level deltas.
             "match_details": r.match_details,

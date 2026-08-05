@@ -367,6 +367,15 @@ class ReconciliationResult(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+    # "Mark as Discrepancy" (mismatch page, added 0010): a reviewer asserts the
+    # row is a genuine discrepancy and records why. Orthogonal to resolve — a
+    # marked row stays open until resolved; the reason flows into exports.
+    marked_discrepancy_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    marked_discrepancy_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    marked_discrepancy_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     match_details: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(

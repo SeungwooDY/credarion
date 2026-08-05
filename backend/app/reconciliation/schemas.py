@@ -29,6 +29,10 @@ class BulkResolveRequest(BaseModel):
     resolved_by: str | None = None
 
 
+class MarkDiscrepancyRequest(BaseModel):
+    reason: str
+
+
 class ConfigUpdate(BaseModel):
     qty_tolerance_pct: Decimal | None = None
     price_tolerance_pct: Decimal | None = None
@@ -107,6 +111,9 @@ class ResultDetail(BaseModel):
     resolution_note: str | None = None
     resolved_by: str | None = None
     resolved_at: datetime | None = None
+    marked_discrepancy_reason: str | None = None
+    marked_discrepancy_by: str | None = None
+    marked_discrepancy_at: datetime | None = None
     match_details: dict | None = None
     created_at: datetime
 
