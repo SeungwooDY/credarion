@@ -538,7 +538,8 @@ class PeriodSignoff(Base):
         UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
     )
     period: Mapped[str] = mapped_column(String, nullable=False)
-    # status: signed_off | reopened
+    # status: open | signed_off | reopened ("open" = month explicitly
+    # created ahead of any data — see routers/periods.py; only "signed_off" locks)
     status: Mapped[str] = mapped_column(String, nullable=False, default="signed_off")
 
     signed_off_by_id: Mapped[uuid.UUID | None] = mapped_column(

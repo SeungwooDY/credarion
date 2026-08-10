@@ -107,6 +107,9 @@ const en: Record<string, string> = {
   "period.no_data": "no data",
   "period.locked": "Signed off — locked",
   "period.all_periods": "All periods",
+  "period.create_month": "Create {month}",
+  "period.creating": "Creating…",
+  "period.create_failed": "Could not create the month. Please try again.",
 
   // ── team management ──
   "team.title": "Team",
@@ -670,6 +673,9 @@ const zh: Record<string, string> = {
   "period.no_data": "无数据",
   "period.locked": "已签核 — 已锁定",
   "period.all_periods": "全部期间",
+  "period.create_month": "创建{month}",
+  "period.creating": "创建中…",
+  "period.create_failed": "无法创建该月份，请重试。",
 
   // ── team management ──
   "team.title": "团队",

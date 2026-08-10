@@ -31,6 +31,26 @@ export function shiftPeriod(period: string, by: number): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
+/** Days from today until the last day of the current month (0 on the last day). */
+export function daysUntilMonthEnd(): number {
+  const now = new Date();
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  return lastDay - now.getDate();
+}
+
+/**
+ * Months the user may explicitly create today, oldest first: the current
+ * month anytime, the next month only within the last 5 days of the current
+ * one. Mirrors backend can_create_period (app/periods.py) — the server
+ * enforces the window; this only decides what to offer in the UI.
+ */
+export function creatablePeriods(): string[] {
+  const cur = currentPeriod();
+  const out = [cur];
+  if (daysUntilMonthEnd() <= 5) out.push(shiftPeriod(cur, 1));
+  return out;
+}
+
 /** Stored period, or "" when unset/invalid ("not chosen yet"). */
 function read(): string {
   const v = window.localStorage.getItem(STORAGE_KEY) ?? "";

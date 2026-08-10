@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, Check, ChevronLeft, ChevronRight, Lock } from "lucide-react";
+import { CalendarDays, Check, ChevronLeft, ChevronRight, Lock, Plus } from "lucide-react";
 import { useLang, useT } from "@/app/lib/i18n";
-import { currentPeriod, shiftPeriod, usePeriod } from "@/app/lib/period";
+import { creatablePeriods, usePeriod } from "@/app/lib/period";
 import { useCurrentOrg, usePeriods, useSignoff } from "@/app/lib/swr";
 
 /** Localized "Mar 2026" / "2026年3月" label for a "YYYY-MM" period. */
@@ -51,8 +51,11 @@ export function PeriodBadge() {
  * Sidebar month switcher — the app's single period control.
  *
  * Collapsed rail: calendar icon with the month number as a badge.
- * Expanded: ‹ label › steppers; the label opens a dropdown of the org's
- * periods (derived from data; locked months show a lock icon).
+ * Expanded: ‹ label › steppers clamped to months that exist; the label opens
+ * a dropdown of the org's periods (derived from data; locked months show a
+ * lock icon) plus a "Create <month>" action when one is creatable — the
+ * current month anytime, the next month in the last 5 days of the current
+ * one (see lib/period.ts creatablePeriods).
  */
 export default function PeriodSwitcher({ isCollapsed }: { isCollapsed: boolean }) {
   const t = useT();
@@ -61,7 +64,30 @@ export default function PeriodSwitcher({ isCollapsed }: { isCollapsed: boolean }
   const { periods, refreshPeriods } = usePeriods(orgId);
   const label = usePeriodLabel(period);
   const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+
+  async function createPeriod(p: string) {
+    if (!orgId || creating) return;
+    setCreating(true);
+    setCreateError(false);
+    try {
+      const res = await fetch("/api/v1/periods", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ org_id: orgId, period: p }),
+      });
+      if (!res.ok) throw new Error(`create period failed: ${res.status}`);
+      await refreshPeriods();
+      setPeriod(p);
+      setOpen(false);
+    } catch {
+      setCreateError(true);
+    } finally {
+      setCreating(false);
+    }
+  }
 
   // Lock flags change when admins sign off / reopen — refetch on open so the
   // dropdown never shows stale locks.
@@ -70,11 +96,15 @@ export default function PeriodSwitcher({ isCollapsed }: { isCollapsed: boolean }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // Default once periods load: latest month with data, else current month.
+  // Default once periods load: latest month with data, else newest existing.
+  // Also snaps a stale stored selection (a month that no longer exists) back
+  // to a real month — months are no longer auto-created, so the stored period
+  // is not guaranteed to be in the list.
   useEffect(() => {
-    if (period || periods.length === 0) return;
+    if (periods.length === 0) return;
+    if (period && periods.some((p) => p.period === period)) return;
     const latestWithData = periods.find((p) => p.has_data)?.period;
-    setPeriod(latestWithData ?? currentPeriod());
+    setPeriod(latestWithData ?? periods[0].period);
   }, [period, periods, setPeriod]);
 
   // Close the dropdown on outside click / Escape.
@@ -97,6 +127,15 @@ export default function PeriodSwitcher({ isCollapsed }: { isCollapsed: boolean }
   const monthNum = period ? period.slice(5) : "--";
   const selectedLocked = periods.find((p) => p.period === period)?.locked ?? false;
 
+  // Steppers move within existing months only (list is newest first).
+  const idx = periods.findIndex((p) => p.period === period);
+  const olderPeriod = idx >= 0 ? periods[idx + 1]?.period : undefined;
+  const newerPeriod = idx > 0 ? periods[idx - 1]?.period : undefined;
+
+  const existing = new Set(periods.map((p) => p.period));
+  const creatable =
+    periods.length > 0 ? creatablePeriods().filter((p) => !existing.has(p)) : [];
+
   return (
     <div
       ref={ref}
@@ -117,8 +156,9 @@ export default function PeriodSwitcher({ isCollapsed }: { isCollapsed: boolean }
         <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => period && setPeriod(shiftPeriod(period, -1))}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-accent"
+            onClick={() => olderPeriod && setPeriod(olderPeriod)}
+            disabled={!olderPeriod}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-accent disabled:pointer-events-none disabled:opacity-30"
             aria-label={t("period.prev_month")}
           >
             <ChevronLeft className="h-4 w-4" />
@@ -135,8 +175,9 @@ export default function PeriodSwitcher({ isCollapsed }: { isCollapsed: boolean }
           </button>
           <button
             type="button"
-            onClick={() => period && setPeriod(shiftPeriod(period, 1))}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-accent"
+            onClick={() => newerPeriod && setPeriod(newerPeriod)}
+            disabled={!newerPeriod}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-accent disabled:pointer-events-none disabled:opacity-30"
             aria-label={t("period.next_month")}
           >
             <ChevronRight className="h-4 w-4" />
@@ -182,6 +223,23 @@ export default function PeriodSwitcher({ isCollapsed }: { isCollapsed: boolean }
               ))}
             </ul>
           )}
+          {creatable.length > 0 && (
+            <div className="border-t border-border">
+              {creatable.map((p) => (
+                <CreatePeriodOption
+                  key={p}
+                  period={p}
+                  disabled={creating}
+                  onCreate={createPeriod}
+                />
+              ))}
+              {createError && (
+                <div className="px-3 pb-2 text-xs text-red-500">
+                  {t("period.create_failed")}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -190,4 +248,28 @@ export default function PeriodSwitcher({ isCollapsed }: { isCollapsed: boolean }
 
 function PeriodOptionLabel({ period }: { period: string }) {
   return <span>{usePeriodLabel(period)}</span>;
+}
+
+function CreatePeriodOption({
+  period,
+  disabled,
+  onCreate,
+}: {
+  period: string;
+  disabled: boolean;
+  onCreate: (p: string) => void;
+}) {
+  const t = useT();
+  const label = usePeriodLabel(period);
+  return (
+    <button
+      type="button"
+      onClick={() => onCreate(period)}
+      disabled={disabled}
+      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-accent transition-colors hover:bg-muted disabled:opacity-50"
+    >
+      <Plus className="h-3.5 w-3.5" />
+      {disabled ? t("period.creating") : t("period.create_month", { month: label })}
+    </button>
+  );
 }

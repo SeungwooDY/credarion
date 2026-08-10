@@ -1,21 +1,25 @@
-"""Period listing — which accounting months exist for an organization.
+"""Period listing + creation — which accounting months exist for an organization.
 
 No registry table: the period set is DERIVED from stored data (statement
-uploads, reconciliation runs, sign-offs), plus the current calendar month so
-a brand-new month is selectable before its first upload. Lock state comes
-from PeriodSignoff. Newest first.
+uploads, reconciliation runs, sign-offs). New months no longer appear
+automatically — they are created explicitly (stored as an "open" PeriodSignoff
+row), gated by can_create_period: the current month anytime, the next month
+only in the last 5 days of the current one. A brand-new org with no periods
+at all still gets the current month so the app is usable out of the box.
+Lock state comes from PeriodSignoff. Newest first.
 """
 from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.auth_deps import authorize_org, get_current_user
 from app.db import get_db
-from app.models import PeriodSignoff, ReconciliationRun, Supplier, SupplierStatement
-from app.periods import current_period, period_label
+from app.models import PeriodSignoff, ReconciliationRun, Supplier, SupplierStatement, User
+from app.periods import can_create_period, current_period, period_label, validate_period
 
 router = APIRouter(prefix="/api/v1/periods", tags=["periods"])
 
@@ -59,7 +63,11 @@ def list_periods(
     locked = {p for p, status in signoff_rows if status == "signed_off"}
 
     data_periods = stmt_periods | run_periods
-    all_periods = data_periods | signoff_periods | {current_period()}
+    all_periods = data_periods | signoff_periods
+    # Bootstrap: an org with no periods at all gets the current month so the
+    # app is usable before its first upload / explicit creation.
+    if not all_periods:
+        all_periods = {current_period()}
 
     return [
         PeriodInfo(
@@ -70,3 +78,68 @@ def list_periods(
         )
         for p in sorted(all_periods, reverse=True)
     ]
+
+
+class CreatePeriodRequest(BaseModel):
+    org_id: uuid.UUID
+    period: str
+
+
+@router.post("", response_model=PeriodInfo, status_code=201)
+def create_period(
+    body: CreatePeriodRequest,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> PeriodInfo:
+    """Explicitly create an accounting month (stored as an "open" sign-off row).
+
+    Allowed for the current month anytime, and for the next month within the
+    last 5 days of the current one (see can_create_period). 409 if the period
+    already exists, 422 if outside the creation window.
+    """
+    # Body org_id is invisible to the router-level enforce_org_scope.
+    authorize_org(db, user, body.org_id)
+    try:
+        validate_period(body.period)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+    existing = (
+        db.query(PeriodSignoff)
+        .filter(PeriodSignoff.org_id == body.org_id, PeriodSignoff.period == body.period)
+        .first()
+    )
+    has_stmt = (
+        db.query(SupplierStatement.id)
+        .join(Supplier, SupplierStatement.supplier_id == Supplier.id)
+        .filter(Supplier.org_id == body.org_id, SupplierStatement.period == body.period)
+        .first()
+    )
+    has_run = (
+        db.query(ReconciliationRun.id)
+        .join(Supplier, ReconciliationRun.supplier_id == Supplier.id)
+        .filter(Supplier.org_id == body.org_id, ReconciliationRun.period == body.period)
+        .first()
+    )
+    if existing is not None or has_stmt is not None or has_run is not None:
+        raise HTTPException(
+            status_code=409, detail=f"Period {body.period} already exists"
+        )
+
+    if not can_create_period(body.period):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Period {body.period} cannot be created yet — the next month "
+                "opens 5 days before the current month ends"
+            ),
+        )
+
+    db.add(PeriodSignoff(org_id=body.org_id, period=body.period, status="open"))
+    db.commit()
+    return PeriodInfo(
+        period=body.period,
+        label=period_label(body.period),
+        has_data=False,
+        locked=False,
+    )
