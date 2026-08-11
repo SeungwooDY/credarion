@@ -110,3 +110,99 @@ export function FileDropzone({
     </div>
   );
 }
+
+interface MultiFileDropzoneProps {
+  /** Currently selected files (owned by the parent). */
+  files: File[];
+  accept: string;
+  /** Called with newly accepted files; the parent appends them to its list. */
+  onAdd: (files: File[]) => void;
+  onRemoveAt: (index: number) => void;
+  disabled?: boolean;
+  className?: string;
+  labels: {
+    click: string;
+    hint: string;
+    formats: string;
+    remove: string;
+  };
+}
+
+/**
+ * Multi-file variant of the dropzone: the drop target stays visible so more
+ * files can be added, with the selected files listed beneath it.
+ */
+export function MultiFileDropzone({
+  files,
+  accept,
+  onAdd,
+  onRemoveAt,
+  disabled = false,
+  className,
+  labels,
+}: MultiFileDropzoneProps) {
+  const { fileInputRef, isDragging, openPicker, handleFileChange, dragHandlers } =
+    useFileUpload({ accept, multiple: true, onSelectMany: onAdd });
+
+  return (
+    <div className={className}>
+      <input
+        type="file"
+        accept={accept}
+        multiple
+        className="hidden"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        disabled={disabled}
+      />
+
+      <div
+        onClick={disabled ? undefined : openPicker}
+        {...(disabled ? {} : dragHandlers)}
+        className={cn(
+          "flex cursor-pointer flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-muted-foreground/25 bg-muted/50 px-4 py-8 text-center transition-colors hover:bg-muted",
+          isDragging && "border-accent/50 bg-accent/5",
+          disabled && "pointer-events-none opacity-50",
+        )}
+      >
+        <div className="rounded-full bg-card p-2.5 shadow-sm">
+          <UploadCloud className="h-5 w-5 text-muted-foreground" />
+        </div>
+        <div>
+          <p className="text-sm font-medium">{labels.click}</p>
+          <p className="text-xs text-muted-foreground">{labels.hint}</p>
+          <p className="mt-1 text-[11px] text-muted-foreground/70">{labels.formats}</p>
+        </div>
+      </div>
+
+      {files.length > 0 && (
+        <ul className="mt-2 space-y-1.5">
+          {files.map((f, i) => (
+            <li
+              key={`${f.name}-${f.size}-${i}`}
+              className="flex items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2"
+            >
+              <div className="rounded-md bg-accent/10 p-1.5">
+                <FileSpreadsheet className="h-4 w-4 text-accent" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium">{f.name}</p>
+                <p className="text-xs text-muted-foreground">{formatBytes(f.size)}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onRemoveAt(i)}
+                disabled={disabled}
+                title={labels.remove}
+                aria-label={labels.remove}
+                className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-red-600 disabled:opacity-40"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}

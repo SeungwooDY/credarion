@@ -6,7 +6,7 @@ import { useCurrentOrg } from "../lib/swr";
 import { usePeriod } from "../lib/period";
 import { PeriodBadge } from "../components/period-switcher";
 import { CARD } from "@/app/lib/ui";
-import { FileDropzone } from "@/components/ui/file-dropzone";
+import { FileDropzone, MultiFileDropzone } from "@/components/ui/file-dropzone";
 import { useT } from "@/app/lib/i18n";
 
 interface POOverlapInfo {
@@ -38,6 +38,12 @@ interface DuplicateInfo {
   row_count: number;
 }
 
+interface BatchResult {
+  name: string;
+  status: "uploaded" | "skipped" | "error";
+  message: string;
+}
+
 const FIELD_LABEL_KEYS: Record<string, string> = {
   po_number: "ingestion.field_po_number",
   material_number: "ingestion.field_material_number",
@@ -58,11 +64,12 @@ export default function IngestionPage() {
   const [grnLoading, setGrnLoading] = useState(false);
   const [grnReplace, setGrnReplace] = useState(false);
 
-  const [stmtFile, setStmtFile] = useState<File | null>(null);
+  const [stmtFiles, setStmtFiles] = useState<File[]>([]);
+  const [stmtIdx, setStmtIdx] = useState(0);
+  const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
   const [stmtStep, setStmtStep] = useState<"select" | "preview" | "done">("select");
   const [stmtLoading, setStmtLoading] = useState(false);
   const [stmtError, setStmtError] = useState("");
-  const [stmtResult, setStmtResult] = useState("");
   const [preview, setPreview] = useState<PreviewData | null>(null);
 
   const [selectedPeriod, setSelectedPeriod] = useState("");
@@ -132,15 +139,32 @@ export default function IngestionPage() {
     setGrnLoading(false);
   }
 
-  async function handlePreview() {
-    if (!stmtFile || !orgId) return;
+  // Record the outcome for file `idx`, then preview the next file in the
+  // queue or show the summary when the batch is exhausted.
+  function advance(idx: number, result: BatchResult) {
+    setBatchResults((prev) => [...prev, result]);
+    setPreview(null);
+    setDuplicateInfo(null);
+    setStmtError("");
+    if (idx + 1 < stmtFiles.length) {
+      void runPreview(idx + 1);
+    } else {
+      setStmtStep("done");
+      setStmtLoading(false);
+    }
+  }
+
+  async function runPreview(idx: number) {
+    const file = stmtFiles[idx];
+    if (!file || !orgId) return;
+    setStmtIdx(idx);
     setStmtLoading(true);
     setStmtError("");
     setPreview(null);
     setDuplicateInfo(null);
 
     const fd = new FormData();
-    fd.append("file", stmtFile);
+    fd.append("file", file);
     fd.append("org_id", orgId);
 
     try {
@@ -150,8 +174,9 @@ export default function IngestionPage() {
       });
       if (!res.ok) {
         const err = await res.json();
-        setStmtError(typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail));
-        setStmtLoading(false);
+        const msg =
+          typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail);
+        advance(idx, { name: file.name, status: "error", message: msg });
         return;
       }
       const data: PreviewData = await res.json();
@@ -160,21 +185,26 @@ export default function IngestionPage() {
       // selected month so the field isn't empty when detection fails.
       setSelectedPeriod(data.detected_period || globalPeriod || "");
       setStmtStep("preview");
+      setStmtLoading(false);
     } catch (e) {
-      setStmtError(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      advance(idx, {
+        name: file.name,
+        status: "error",
+        message: e instanceof Error ? e.message : String(e),
+      });
     }
-    setStmtLoading(false);
   }
 
   async function handleConfirmUpload(replace = false) {
+    const file = stmtFiles[stmtIdx];
     const supplierId = preview?.matched_supplier_id;
-    if (!stmtFile || !supplierId || !selectedPeriod) return;
+    if (!file || !supplierId || !selectedPeriod) return;
     setStmtLoading(true);
     setStmtError("");
     setDuplicateInfo(null);
 
     const fd = new FormData();
-    fd.append("file", stmtFile);
+    fd.append("file", file);
     fd.append("supplier_id", supplierId);
     fd.append("period", selectedPeriod);
     if (replace) fd.append("replace", "true");
@@ -186,32 +216,43 @@ export default function IngestionPage() {
       });
       const data = await res.json();
       if (res.ok) {
-        setStmtResult(
-          (replace ? t("ingestion.stmt_replaced_prefix") : "") +
+        advance(stmtIdx, {
+          name: file.name,
+          status: "uploaded",
+          message:
+            (replace ? t("ingestion.stmt_replaced_prefix") : "") +
             t("ingestion.stmt_result", {
               ingested: data.rows_ingested,
               skipped: data.rows_skipped,
-            })
-        );
-        setStmtStep("done");
+            }),
+        });
       } else if (res.status === 409) {
         setDuplicateInfo(data.detail?.existing || null);
+        setStmtLoading(false);
       } else {
         const msg = typeof data.detail === "string" ? data.detail : data.detail?.message || JSON.stringify(data);
         setStmtError(msg);
+        setStmtLoading(false);
       }
     } catch (e) {
       setStmtError(`Error: ${e instanceof Error ? e.message : String(e)}`);
+      setStmtLoading(false);
     }
-    setStmtLoading(false);
+  }
+
+  function skipCurrent() {
+    const file = stmtFiles[stmtIdx];
+    if (!file) return;
+    advance(stmtIdx, { name: file.name, status: "skipped", message: "" });
   }
 
   function resetStatement() {
-    setStmtFile(null);
+    setStmtFiles([]);
+    setStmtIdx(0);
+    setBatchResults([]);
     setStmtStep("select");
     setStmtLoading(false);
     setStmtError("");
-    setStmtResult("");
     setPreview(null);
     setSelectedPeriod("");
     setDuplicateInfo(null);
@@ -309,22 +350,39 @@ export default function IngestionPage() {
               <label className="block text-xs font-medium mb-1">
                 {t("ingestion.stmt_file")}
               </label>
-              <FileDropzone
-                file={stmtFile}
+              <MultiFileDropzone
+                files={stmtFiles}
                 accept=".csv,.xlsx,.xls"
-                onSelect={setStmtFile}
-                onRemove={() => setStmtFile(null)}
+                onAdd={(added) =>
+                  setStmtFiles((prev) => {
+                    const seen = new Set(prev.map((f) => `${f.name}|${f.size}`));
+                    return [
+                      ...prev,
+                      ...added.filter((f) => !seen.has(`${f.name}|${f.size}`)),
+                    ];
+                  })
+                }
+                onRemoveAt={(i) =>
+                  setStmtFiles((prev) => prev.filter((_, j) => j !== i))
+                }
                 disabled={stmtLoading}
                 labels={dzLabels}
                 className="mb-3"
               />
 
               <button
-                onClick={handlePreview}
-                disabled={!stmtFile || !orgId || stmtLoading}
+                onClick={() => {
+                  setBatchResults([]);
+                  void runPreview(0);
+                }}
+                disabled={!stmtFiles.length || !orgId || stmtLoading}
                 className="px-4 py-2 bg-accent hover:bg-accent-dark text-white rounded-lg text-sm disabled:opacity-40 transition-colors"
               >
-                {stmtLoading ? t("ingestion.analyzing") : t("ingestion.analyze_file")}
+                {stmtLoading
+                  ? t("ingestion.analyzing")
+                  : stmtFiles.length > 1
+                    ? t("ingestion.analyze_files", { n: stmtFiles.length })
+                    : t("ingestion.analyze_file")}
               </button>
             </>
           )}
@@ -332,6 +390,17 @@ export default function IngestionPage() {
           {/* Step 2: Preview & confirm */}
           {stmtStep === "preview" && preview && (
             <div className="space-y-4">
+              {stmtFiles.length > 1 && (
+                <p className="text-xs font-medium text-zinc-500">
+                  {t("ingestion.file_x_of_n", {
+                    i: stmtIdx + 1,
+                    n: stmtFiles.length,
+                  })}{" "}
+                  <span className="font-mono text-zinc-700">
+                    {stmtFiles[stmtIdx]?.name}
+                  </span>
+                </p>
+              )}
               <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs space-y-2">
                 <p className="font-semibold text-blue-800">
                   {t("ingestion.auto_detected")}
@@ -494,6 +563,15 @@ export default function IngestionPage() {
                     >
                       {stmtLoading ? t("ingestion.replacing") : t("ingestion.replace_existing")}
                     </button>
+                    {stmtFiles.length > 1 && (
+                      <button
+                        onClick={skipCurrent}
+                        disabled={stmtLoading}
+                        className="px-3 py-1.5 border border-amber-300 text-amber-800 rounded-lg text-xs disabled:opacity-40"
+                      >
+                        {t("ingestion.skip_file")}
+                      </button>
+                    )}
                     <button
                       onClick={() => setDuplicateInfo(null)}
                       className="px-3 py-1.5 border border-amber-300 text-amber-800 rounded-lg text-xs"
@@ -515,6 +593,15 @@ export default function IngestionPage() {
                   >
                     {stmtLoading ? t("ingestion.uploading") : t("ingestion.confirm_upload")}
                   </button>
+                  {stmtFiles.length > 1 && (
+                    <button
+                      onClick={skipCurrent}
+                      disabled={stmtLoading}
+                      className="px-4 py-2 border border-border rounded-lg text-sm text-zinc-600 hover:bg-muted transition-colors disabled:opacity-40"
+                    >
+                      {t("ingestion.skip_file")}
+                    </button>
+                  )}
                   <button
                     onClick={resetStatement}
                     className="px-4 py-2 border border-border rounded-lg text-sm text-zinc-600 hover:bg-muted transition-colors"
@@ -526,12 +613,36 @@ export default function IngestionPage() {
             </div>
           )}
 
-          {/* Step 3: Done */}
+          {/* Step 3: Done — per-file batch summary */}
           {stmtStep === "done" && (
             <div className="space-y-3">
-              <div className="text-xs p-3 bg-green-50 text-green-700 border border-green-200 rounded-lg font-mono">
-                {stmtResult}
-              </div>
+              {batchResults.length > 1 && (
+                <p className="text-xs font-medium text-zinc-600">
+                  {t("ingestion.batch_summary")}
+                </p>
+              )}
+              <ul className="space-y-1.5">
+                {batchResults.map((r, i) => (
+                  <li
+                    key={i}
+                    className={`text-xs p-3 rounded-lg border font-mono ${
+                      r.status === "uploaded"
+                        ? "bg-green-50 text-green-700 border-green-200"
+                        : r.status === "skipped"
+                          ? "bg-zinc-50 text-zinc-600 border-zinc-200"
+                          : "bg-red-50 text-red-700 border-red-200"
+                    }`}
+                  >
+                    <span className="font-medium">{r.name}</span>
+                    {": "}
+                    {r.status === "uploaded"
+                      ? r.message
+                      : r.status === "skipped"
+                        ? t("ingestion.status_skipped")
+                        : `${t("ingestion.status_error")}${r.message ? ` — ${r.message}` : ""}`}
+                  </li>
+                ))}
+              </ul>
               <button
                 onClick={resetStatement}
                 className="px-4 py-2 border border-border rounded-lg text-sm text-zinc-600 hover:bg-muted transition-colors"

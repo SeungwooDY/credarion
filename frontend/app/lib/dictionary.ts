@@ -233,7 +233,7 @@ const en: Record<string, string> = {
   "ingestion.grn_replace_existing": "Replace existing records (purge & re-ingest rows already in the system)",
   "ingestion.upload_complete": "Upload complete",
   "ingestion.stmt_card_title": "Supplier Statement",
-  "ingestion.stmt_card_help": "Upload a reconciliation statement (对账单) received from a supplier. The system will auto-detect the supplier, period, and column structure.",
+  "ingestion.stmt_card_help": "Upload one or more reconciliation statements (对账单) received from suppliers. Each file is analyzed in turn — the system auto-detects the supplier, period, and column structure.",
   "ingestion.stmt_file": "Statement File",
   "ingestion.analyzing": "Analyzing file...",
   "ingestion.analyze_file": "Analyze File",
@@ -266,6 +266,12 @@ const en: Record<string, string> = {
   "ingestion.upload_another": "Upload another statement",
   "ingestion.stmt_replaced_prefix": "Replaced previous statement. ",
   "ingestion.stmt_result": "Ingested {ingested} rows, skipped {skipped}",
+  "ingestion.analyze_files": "Analyze {n} Files",
+  "ingestion.file_x_of_n": "File {i} of {n}:",
+  "ingestion.skip_file": "Skip this file",
+  "ingestion.batch_summary": "Upload summary",
+  "ingestion.status_skipped": "Skipped",
+  "ingestion.status_error": "Failed",
 
   // ── reconciliation ──
   "reconciliation.title": "Reconciliation",
@@ -799,7 +805,7 @@ const zh: Record<string, string> = {
   "ingestion.grn_replace_existing": "替换已有记录（清除并重新导入系统中已存在的行）",
   "ingestion.upload_complete": "上传完成",
   "ingestion.stmt_card_title": "供应商对账单",
-  "ingestion.stmt_card_help": "上传从供应商处收到的对账单。系统将自动识别供应商、期间和列结构。",
+  "ingestion.stmt_card_help": "上传一份或多份从供应商处收到的对账单。系统将逐个分析文件，自动识别供应商、期间和列结构。",
   "ingestion.stmt_file": "对账单文件",
   "ingestion.analyzing": "正在分析文件…",
   "ingestion.analyze_file": "分析文件",
@@ -832,6 +838,12 @@ const zh: Record<string, string> = {
   "ingestion.upload_another": "上传另一份对账单",
   "ingestion.stmt_replaced_prefix": "已替换之前的对账单。",
   "ingestion.stmt_result": "已导入 {ingested} 行，已跳过 {skipped} 行",
+  "ingestion.analyze_files": "分析 {n} 个文件",
+  "ingestion.file_x_of_n": "第 {i} / {n} 个文件：",
+  "ingestion.skip_file": "跳过此文件",
+  "ingestion.batch_summary": "上传汇总",
+  "ingestion.status_skipped": "已跳过",
+  "ingestion.status_error": "失败",
 
   // ── reconciliation ──
   "reconciliation.title": "对账",

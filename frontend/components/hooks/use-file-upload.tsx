@@ -6,6 +6,9 @@ interface UseFileUploadProps {
   /** Comma-separated extension list, e.g. ".csv,.xlsx,.xls". Empty = accept any. */
   accept?: string;
   onSelect?: (file: File) => void;
+  /** Allow picking/dropping several files; accepted ones go to `onSelectMany`. */
+  multiple?: boolean;
+  onSelectMany?: (files: File[]) => void;
 }
 
 /**
@@ -14,7 +17,12 @@ interface UseFileUploadProps {
  * selected file lives with the parent; this hook only wires the hidden input,
  * drag state, and extension validation, calling `onSelect` with accepted files.
  */
-export function useFileUpload({ accept = "", onSelect }: UseFileUploadProps = {}) {
+export function useFileUpload({
+  accept = "",
+  onSelect,
+  multiple = false,
+  onSelectMany,
+}: UseFileUploadProps = {}) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
@@ -35,14 +43,23 @@ export function useFileUpload({ accept = "", onSelect }: UseFileUploadProps = {}
 
   const openPicker = useCallback(() => fileInputRef.current?.click(), []);
 
+  const deliver = useCallback(
+    (fileList: FileList | null | undefined) => {
+      const accepted = Array.from(fileList ?? []).filter(isAccepted);
+      if (!accepted.length) return;
+      if (multiple) onSelectMany?.(accepted);
+      else onSelect?.(accepted[0]);
+    },
+    [isAccepted, multiple, onSelect, onSelectMany],
+  );
+
   const handleFileChange = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (file && isAccepted(file)) onSelect?.(file);
+      deliver(event.target.files);
       // Reset so selecting the same file again still fires onChange.
       if (fileInputRef.current) fileInputRef.current.value = "";
     },
-    [isAccepted, onSelect],
+    [deliver],
   );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -67,10 +84,9 @@ export function useFileUpload({ accept = "", onSelect }: UseFileUploadProps = {}
       e.preventDefault();
       e.stopPropagation();
       setIsDragging(false);
-      const file = e.dataTransfer.files?.[0];
-      if (file && isAccepted(file)) onSelect?.(file);
+      deliver(e.dataTransfer.files);
     },
-    [isAccepted, onSelect],
+    [deliver],
   );
 
   return {
