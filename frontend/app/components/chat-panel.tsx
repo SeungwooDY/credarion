@@ -4,16 +4,29 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 import { useCurrentOrg } from "../lib/swr";
 import { useT } from "@/app/lib/i18n";
+import { closeChat, openChat, useChatOpen } from "../lib/chat-store";
 
 interface Message {
   role: "user" | "assistant";
   content: string;
 }
 
+/** Bouncing three-dot typing indicator, shown until the first token streams in. */
+function TypingDots() {
+  return (
+    <span className="flex items-center gap-1 py-1.5 px-0.5" aria-label="…">
+      <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce [animation-delay:-0.3s]" />
+      <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce [animation-delay:-0.15s]" />
+      <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 animate-bounce" />
+    </span>
+  );
+}
+
 export default function ChatPanel() {
   const t = useT();
   const { orgId: currentOrgId, orgName } = useCurrentOrg();
-  const [open, setOpen] = useState(false);
+  // Shared store so the sidebar's "AI Assistant" item opens the same panel.
+  const open = useChatOpen();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
@@ -133,7 +146,7 @@ export default function ChatPanel() {
       {/* Floating button */}
       {!open && (
         <button
-          onClick={() => setOpen(true)}
+          onClick={openChat}
           className="fixed bottom-6 right-6 w-12 h-12 rounded-full bg-gradient-to-br from-[#5e82ec] via-accent to-accent-dark text-white shadow-lg hover:shadow-xl transition-all flex items-center justify-center z-50 group"
         >
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="group-hover:scale-110 transition-transform">
@@ -152,7 +165,7 @@ export default function ChatPanel() {
         <div className="fixed bottom-6 right-6 w-[400px] h-[560px] rounded-2xl shadow-2xl border border-border flex flex-col z-50 overflow-hidden" style={{ backgroundColor: "#ffffff" }}>
           {/* Header — click anywhere to minimize */}
           <div
-            onClick={() => setOpen(false)}
+            onClick={closeChat}
             className="px-4 py-3 flex items-center justify-between shrink-0 bg-gradient-to-r from-[#5e82ec] via-accent to-accent-dark text-white rounded-t-2xl cursor-pointer select-none"
           >
             <div className="flex items-center gap-2.5">
@@ -240,13 +253,17 @@ export default function ChatPanel() {
                   }`}
                 >
                   {msg.role === "assistant" ? (
-                    <div className="chat-markdown">
-                      <ReactMarkdown>{msg.content}</ReactMarkdown>
-                    </div>
+                    msg.content === "" && streaming && i === messages.length - 1 ? (
+                      <TypingDots />
+                    ) : (
+                      <div className="chat-markdown">
+                        <ReactMarkdown>{msg.content}</ReactMarkdown>
+                      </div>
+                    )
                   ) : (
                     msg.content
                   )}
-                  {streaming && i === messages.length - 1 && msg.role === "assistant" && (
+                  {streaming && msg.content !== "" && i === messages.length - 1 && msg.role === "assistant" && (
                     <span className="inline-block w-1.5 h-4 bg-accent/50 ml-0.5 animate-pulse rounded-sm" />
                   )}
                 </div>

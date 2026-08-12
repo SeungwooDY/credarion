@@ -10,6 +10,7 @@ import {
   Home,
   LogOut,
   Megaphone,
+  MessageCircle,
   Settings,
   TriangleAlert,
   Upload,
@@ -19,7 +20,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,6 +33,7 @@ import NotificationBellContainer from "@/app/components/notification-bell-contai
 import PeriodSwitcher from "@/app/components/period-switcher";
 import { useT } from "@/app/lib/i18n";
 import { useMe } from "@/app/lib/swr";
+import { openChat } from "@/app/lib/chat-store";
 
 const PLAN_LABELS: Record<string, string> = {
   starter: "Starter",
@@ -204,23 +206,41 @@ export function SessionNavBar() {
                       }
 
                       return (
-                        <Link
-                          key={item.url}
-                          href={item.url}
-                          className={cn(
-                            "flex h-8 w-full flex-row items-center rounded-md px-2 py-1.5 text-muted-foreground transition hover:bg-muted hover:text-accent",
-                            active && "bg-accent-light text-accent",
+                        <Fragment key={item.url}>
+                          {/* AI assistant sits above Settings — it opens the
+                              chat panel rather than navigating. */}
+                          {item.labelKey === "nav.settings" && (
+                            <button
+                              onClick={openChat}
+                              className="flex h-8 w-full flex-row items-center rounded-md px-2 py-1.5 text-muted-foreground transition hover:bg-muted hover:text-accent"
+                            >
+                              <MessageCircle className="h-4 w-4 shrink-0" />
+                              <motion.li variants={variants} className="list-none">
+                                {!isCollapsed && (
+                                  <p className="ml-2 text-sm font-medium">
+                                    {t("nav.assistant")}
+                                  </p>
+                                )}
+                              </motion.li>
+                            </button>
                           )}
-                        >
-                          <Icon className="h-4 w-4 shrink-0" />
-                          <motion.li variants={variants} className="list-none">
-                            {!isCollapsed && (
-                              <p className="ml-2 text-sm font-medium">
-                                {t(item.labelKey)}
-                              </p>
+                          <Link
+                            href={item.url}
+                            className={cn(
+                              "flex h-8 w-full flex-row items-center rounded-md px-2 py-1.5 text-muted-foreground transition hover:bg-muted hover:text-accent",
+                              active && "bg-accent-light text-accent",
                             )}
-                          </motion.li>
-                        </Link>
+                          >
+                            <Icon className="h-4 w-4 shrink-0" />
+                            <motion.li variants={variants} className="list-none">
+                              {!isCollapsed && (
+                                <p className="ml-2 text-sm font-medium">
+                                  {t(item.labelKey)}
+                                </p>
+                              )}
+                            </motion.li>
+                          </Link>
+                        </Fragment>
                       );
                     })}
                   </div>
