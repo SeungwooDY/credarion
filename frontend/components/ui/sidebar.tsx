@@ -105,7 +105,10 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { labelKey: "nav.dashboard", url: "/", icon: Home },
   { labelKey: "nav.ingestion", url: "/ingestion", icon: Upload },
-  { labelKey: "nav.reconciliation", url: "/reconciliation", icon: CircleCheck },
+  // Reconciliation hidden: it now runs automatically on statement/GRN
+  // uploads. The page stays reachable at /reconciliation for engine testing
+  // (see also backend scripts/run_recon.py).
+  // { labelKey: "nav.reconciliation", url: "/reconciliation", icon: CircleCheck },
   { labelKey: "nav.mismatches", url: "/mismatches", icon: TriangleAlert },
   // Escalations hidden for now — small pilot teams don't need the escalation
   // workflow; uncomment to restore (page + backend remain intact).

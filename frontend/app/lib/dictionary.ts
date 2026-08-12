@@ -274,6 +274,8 @@ const en: Record<string, string> = {
   "ingestion.batch_summary": "Upload summary",
   "ingestion.status_skipped": "Skipped",
   "ingestion.status_error": "Failed",
+  "ingestion.auto_recon_note":
+    "Reconciliation is running automatically in the background — results will appear on the Mismatches page shortly.",
 
   // ── reconciliation ──
   "reconciliation.title": "Reconciliation",
@@ -853,6 +855,8 @@ const zh: Record<string, string> = {
   "ingestion.batch_summary": "上传汇总",
   "ingestion.status_skipped": "已跳过",
   "ingestion.status_error": "失败",
+  "ingestion.auto_recon_note":
+    "系统正在后台自动对账——结果稍后将显示在差异页面。",
 
   // ── reconciliation ──
   "reconciliation.title": "对账",

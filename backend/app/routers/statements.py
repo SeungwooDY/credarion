@@ -9,7 +9,16 @@ import uuid
 from pathlib import Path
 
 import pandas as pd
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+)
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -22,6 +31,7 @@ from app.ingestion.cleaning import normalize_po_number
 from app.ingestion.column_mapping import try_alias_mapping
 from app.ingestion.header_detection import clean_header_cells, detect_header_row
 from app.ingestion.statement_ingestor import IngestionResult, ingest_supplier_statement
+from app.reconciliation.auto_run import auto_reconcile
 from app.models import (
     ERPRecord,
     StatementLineItem,
@@ -46,6 +56,8 @@ class IngestionResponse(BaseModel):
     rows_skipped: int = 0
     mapping_source: str | None = None
     errors: list[str] = []
+    # True when a background reconciliation run was scheduled for this upload.
+    reconciliation_queued: bool = False
 
 
 class ExistingStatementInfo(BaseModel):
@@ -211,6 +223,7 @@ def check_existing(
 
 @router.post("/upload", response_model=IngestionResponse, status_code=201)
 async def upload_statement(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     supplier_id: uuid.UUID = Form(...),
     period: str = Form(...),
@@ -226,6 +239,9 @@ async def upload_statement(
     If a statement already exists for this supplier+period:
       - Without replace=true: returns 409 Conflict with existing statement info
       - With replace=true: deletes the old statement and uploads the new one
+
+    On a successful ingestion, reconciliation for this supplier+period is
+    scheduled in the background — results land on the mismatch page.
 
     Returns 201 on success, 202 if column mapping needs human review.
     """
@@ -279,6 +295,12 @@ async def upload_statement(
 
     if result.status == "error":
         raise HTTPException(status_code=400, detail=response.model_dump())
+
+    # Reconcile automatically once rows are in — the upload response returns
+    # immediately and the run happens after it is sent.
+    if result.status == "success" and result.rows_ingested > 0:
+        background_tasks.add_task(auto_reconcile, supplier_id, period)
+        response.reconciliation_queued = True
 
     # Return 202 if needs review, 201 if success
     return response

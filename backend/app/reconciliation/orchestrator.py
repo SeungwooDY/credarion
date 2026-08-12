@@ -19,6 +19,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import desc, or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -361,6 +362,85 @@ def _period_date_range(period: str) -> tuple[datetime, datetime]:
     start = datetime(year, month, 1)
     end = datetime(year, month, last_day, 23, 59, 59)
     return start, end
+
+
+def _carry_forward_review_state(
+    db: Session,
+    supplier_id: Any,
+    period: str,
+    run: ReconciliationRun,
+    all_results: list,
+) -> None:
+    """Copy human review state (discrepancy marks, resolutions) from the
+    previous completed run onto equivalent rows of the new run.
+
+    Every run rebuilds its result rows from scratch, which used to silently
+    drop marks and resolves whenever reconciliation re-ran (now automatic on
+    every upload). A row is "equivalent" when it references the same ERP
+    record + statement line with the same discrepancy_type and unchanged
+    qty/price deltas — if the underlying data shifted, the old judgement may
+    no longer apply and is deliberately NOT carried.
+    """
+    prev_run = (
+        db.query(ReconciliationRun)
+        .filter(
+            ReconciliationRun.supplier_id == supplier_id,
+            ReconciliationRun.period == period,
+            ReconciliationRun.status == "completed",
+            ReconciliationRun.id != run.id,
+        )
+        .order_by(desc(ReconciliationRun.started_at))
+        .first()
+    )
+    if prev_run is None:
+        return
+
+    prior = (
+        db.query(ReconciliationResult)
+        .filter(
+            ReconciliationResult.run_id == prev_run.id,
+            or_(
+                ReconciliationResult.marked_discrepancy_reason.isnot(None),
+                ReconciliationResult.status == "resolved",
+            ),
+        )
+        .all()
+    )
+    if not prior:
+        return
+
+    def _key(r: ReconciliationResult) -> tuple:
+        return (
+            r.erp_record_id,
+            r.statement_line_id,
+            r.discrepancy_type,
+            r.quantity_delta,
+            r.price_delta,
+        )
+
+    prior_by_key = {_key(r): r for r in prior}
+    carried_marks = carried_resolves = 0
+    for r in all_results:
+        p = prior_by_key.get(_key(r))
+        if p is None:
+            continue
+        if p.marked_discrepancy_reason is not None and r.marked_discrepancy_reason is None:
+            r.marked_discrepancy_reason = p.marked_discrepancy_reason
+            r.marked_discrepancy_by = p.marked_discrepancy_by
+            r.marked_discrepancy_at = p.marked_discrepancy_at
+            carried_marks += 1
+        if p.status == "resolved" and r.status != "resolved":
+            r.status = "resolved"
+            r.resolution_note = p.resolution_note
+            r.resolved_by = p.resolved_by
+            r.resolved_at = p.resolved_at
+            carried_resolves += 1
+    if carried_marks or carried_resolves:
+        logger.info(
+            "[RECON DEBUG] Carried forward review state from run %s: "
+            "%d marks, %d resolutions",
+            prev_run.id, carried_marks, carried_resolves,
+        )
 
 
 async def run_reconciliation(
@@ -789,6 +869,9 @@ async def run_reconciliation(
 
         # Bulk insert results
         db.add_all(all_results)
+
+        # Preserve human review state (marks/resolves) across re-runs.
+        _carry_forward_review_state(db, supplier_id, period, run, all_results)
 
         # Update run stats (see _compute_run_stats for the counting rules).
         stats = _compute_run_stats(all_results, run.total_statement)

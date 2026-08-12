@@ -9,7 +9,15 @@ import tempfile
 import threading
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+)
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -17,11 +25,52 @@ from sqlalchemy.orm import Session
 from app.auth_deps import authorize_org, get_current_user
 from app.db import SessionLocal, get_db
 from app.ingestion.grn_ingestor import GRNIngestionResult, ingest_grn
-from app.models import User
+from app.models import PeriodSignoff, SupplierStatement, User
+from app.reconciliation.auto_run import auto_reconcile
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/erp", tags=["erp"])
+
+
+def _recon_pairs(
+    db: Session,
+    org_id: uuid.UUID,
+    affected: list[tuple[uuid.UUID, str]],
+) -> list[tuple[uuid.UUID, str]]:
+    """Filter (supplier, period) pairs touched by a GRN upload down to the
+    ones worth auto-reconciling: a statement exists and the period is not
+    signed off."""
+    if not affected:
+        return []
+    locked = {
+        p
+        for (p,) in db.query(PeriodSignoff.period).filter(
+            PeriodSignoff.org_id == org_id,
+            PeriodSignoff.status == "signed_off",
+        )
+    }
+    pairs: list[tuple[uuid.UUID, str]] = []
+    for supplier_id, period in affected:
+        if period in locked:
+            continue
+        has_statement = (
+            db.query(SupplierStatement.id)
+            .filter(
+                SupplierStatement.supplier_id == supplier_id,
+                SupplierStatement.period == period,
+            )
+            .first()
+        )
+        if has_statement:
+            pairs.append((supplier_id, period))
+    return pairs
+
+
+async def _run_auto_recon(pairs: list[tuple[uuid.UUID, str]]) -> None:
+    """Reconcile the pairs one at a time (serial keeps AI-credit use bounded)."""
+    for supplier_id, period in pairs:
+        await auto_reconcile(supplier_id, period)
 
 
 class GRNIngestionResponse(BaseModel):
@@ -37,6 +86,7 @@ class GRNIngestionResponse(BaseModel):
 
 @router.post("/upload", response_model=GRNIngestionResponse, status_code=201)
 def upload_grn(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     org_id: uuid.UUID = Form(...),
     replace: bool = Form(False),
@@ -84,11 +134,18 @@ def upload_grn(
     if result.status == "error":
         raise HTTPException(status_code=400, detail=response.model_dump())
 
+    # Auto-rerun reconciliation for supplier+periods this upload touched that
+    # already have a statement (skipping signed-off months).
+    pairs = _recon_pairs(db, org_id, result.affected_periods)
+    if pairs:
+        background_tasks.add_task(_run_auto_recon, pairs)
+
     return response
 
 
 @router.post("/upload-stream")
 def upload_grn_stream(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     org_id: uuid.UUID = Form(...),
     replace: bool = Form(False),
@@ -98,7 +155,9 @@ def upload_grn_stream(
     """Upload GRN with SSE progress events.
 
     Returns a text/event-stream with progress updates during ingestion.
-    Final event contains the full result.
+    Final event contains the full result. After the stream closes,
+    reconciliation auto-reruns for affected supplier+periods that already
+    have a statement.
     """
     authorize_org(db, user, org_id)
     suffix = (
@@ -121,6 +180,11 @@ def upload_grn_stream(
             "message": message,
         })
 
+    # Populated by the ingestion thread; read by the post-stream background
+    # task. Safe because the stream (and thus the task) only ends after the
+    # thread's sentinel.
+    recon_pairs: list[tuple[uuid.UUID, str]] = []
+
     def run_ingestion() -> None:
         db = SessionLocal()
         try:
@@ -128,6 +192,7 @@ def upload_grn_stream(
                 file_path=tmp_path, org_id=org_id, db=db,
                 on_progress=on_progress, replace=replace,
             )
+            recon_pairs.extend(_recon_pairs(db, org_id, result.affected_periods))
             progress_queue.put({
                 "type": "result",
                 "status": result.status,
@@ -160,4 +225,7 @@ def upload_grn_stream(
                 break
             yield f"data: {json.dumps(item)}\n\n"
 
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
+    background_tasks.add_task(_run_auto_recon, recon_pairs)
+    return StreamingResponse(
+        event_stream(), media_type="text/event-stream", background=background_tasks
+    )

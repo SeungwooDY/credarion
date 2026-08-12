@@ -61,6 +61,9 @@ class GRNIngestionResult:
     suppliers_created: int = 0
     suppliers_existing: int = 0
     errors: list[str] = field(default_factory=list)
+    # (supplier_id, "YYYY-MM") pairs touched by newly ingested rows — used by
+    # the upload endpoints to auto-rerun reconciliation where a statement exists.
+    affected_periods: list[tuple[uuid.UUID, str]] = field(default_factory=list)
 
 
 def _resolve_grn_columns(df_columns: list[str]) -> dict[str, str]:
@@ -380,6 +383,14 @@ def ingest_grn(
     result.rows_duplicate = duplicates
     result.rows_replaced = replaced
     result.status = "success"
+    result.affected_periods = sorted(
+        {
+            (r.supplier_id, f"{r.grn_date.year:04d}-{r.grn_date.month:02d}")
+            for r in records
+            if r.grn_date is not None
+        },
+        key=lambda pair: (str(pair[0]), pair[1]),
+    )
 
     db.commit()
     if on_progress:

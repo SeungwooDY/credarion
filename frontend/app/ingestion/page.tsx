@@ -643,6 +643,11 @@ export default function IngestionPage() {
                   </li>
                 ))}
               </ul>
+              {batchResults.some((r) => r.status === "uploaded") && (
+                <p className="text-xs text-zinc-500">
+                  {t("ingestion.auto_recon_note")}
+                </p>
+              )}
               <button
                 onClick={resetStatement}
                 className="px-4 py-2 border border-border rounded-lg text-sm text-zinc-600 hover:bg-muted transition-colors"
