@@ -376,7 +376,7 @@ export default function IngestionPage() {
       {/* Gate: ERP export first — statements unlock once this month's
           receipts are in (they need the suppliers + GRN rows to match). */}
       {!hasErpData && !erpStatusLoading && (
-        <div className="max-w-xl">
+        <div className="max-w-xl mx-auto">
           <div className="mb-4 text-xs p-3 rounded-lg border border-blue-200 bg-blue-50 text-blue-800">
             {t("ingestion.erp_first_hint", { period: globalPeriod })}
           </div>
@@ -385,7 +385,7 @@ export default function IngestionPage() {
       )}
 
       {hasErpData && (
-        <div className="max-w-2xl">
+        <div className="max-w-2xl mx-auto">
         {/* Statement Upload */}
         <div className={`${CARD} p-5`}>
           <h3 className="font-semibold text-sm mb-1">{t("ingestion.stmt_card_title")}</h3>
