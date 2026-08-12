@@ -624,8 +624,10 @@ function SupplierCard({
                 </button>
               )}
               {/* Escalation stays enabled under lock — raising issues about a
-                  signed-off period is exactly the workflow the lock creates. */}
-              {selected.size === 1 && (
+                  signed-off period is exactly the workflow the lock creates.
+                  Hidden for now along with the escalations page (small pilot
+                  teams) — remove the `false &&` to restore. */}
+              {false && selected.size === 1 && (
                 <button
                   onClick={() => {
                     const item = filteredItems.find((i) => selected.has(i.id));

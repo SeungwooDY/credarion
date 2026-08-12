@@ -107,7 +107,9 @@ const NAV_ITEMS: NavItem[] = [
   { labelKey: "nav.ingestion", url: "/ingestion", icon: Upload },
   { labelKey: "nav.reconciliation", url: "/reconciliation", icon: CircleCheck },
   { labelKey: "nav.mismatches", url: "/mismatches", icon: TriangleAlert },
-  { labelKey: "nav.escalations", url: "/escalations", icon: Megaphone },
+  // Escalations hidden for now — small pilot teams don't need the escalation
+  // workflow; uncomment to restore (page + backend remain intact).
+  // { labelKey: "nav.escalations", url: "/escalations", icon: Megaphone },
   // Invoices hidden for now — kept here to restore when Phase 2 ships.
   // { labelKey: "nav.invoices", url: "/invoices", icon: FileText, comingSoon: true },
   { labelKey: "nav.settings", url: "/settings", icon: Settings },
