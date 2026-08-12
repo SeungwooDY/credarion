@@ -23,6 +23,7 @@ from fastapi import (
 )
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session
 
 from app.auth_deps import authorize_org, get_current_user
@@ -100,11 +101,12 @@ def erp_status(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> ERPStatusResponse:
-    """Whether the org has ERP/GRN rows dated inside the given month.
+    """Whether the org has ERP/GRN rows uploaded for the given month.
 
     The ingestion page gates statement upload on this: ERP export first,
     then supplier statements (statements need the suppliers + receipts the
-    GRN upload creates).
+    GRN upload creates). Scoped by the upload's period tag; legacy untagged
+    rows fall back to their grn_date month.
     """
     authorize_org(db, user, org_id)
     try:
@@ -118,8 +120,14 @@ def erp_status(
         db.query(ERPRecord)
         .filter(
             ERPRecord.org_id == org_id,
-            ERPRecord.grn_date >= start,
-            ERPRecord.grn_date <= end,
+            or_(
+                ERPRecord.period == period,
+                and_(
+                    ERPRecord.period.is_(None),
+                    ERPRecord.grn_date >= start,
+                    ERPRecord.grn_date <= end,
+                ),
+            ),
         )
         .count()
     )
@@ -132,6 +140,7 @@ def upload_grn(
     file: UploadFile = File(...),
     org_id: uuid.UUID = Form(...),
     replace: bool = Form(False),
+    period: str | None = Form(None),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> GRNIngestionResponse:
@@ -146,6 +155,11 @@ def upload_grn(
     reconciliation afterwards.
     """
     authorize_org(db, user, org_id)
+    if period is not None:
+        try:
+            validate_period(period)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
     suffix = (
         "." + file.filename.rsplit(".", 1)[-1]
         if file.filename and "." in file.filename
@@ -160,6 +174,7 @@ def upload_grn(
         org_id=org_id,
         db=db,
         replace=replace,
+        period=period,
     )
 
     response = GRNIngestionResponse(
@@ -191,6 +206,7 @@ def upload_grn_stream(
     file: UploadFile = File(...),
     org_id: uuid.UUID = Form(...),
     replace: bool = Form(False),
+    period: str | None = Form(None),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> StreamingResponse:
@@ -202,6 +218,11 @@ def upload_grn_stream(
     have a statement.
     """
     authorize_org(db, user, org_id)
+    if period is not None:
+        try:
+            validate_period(period)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
     suffix = (
         "." + file.filename.rsplit(".", 1)[-1]
         if file.filename and "." in file.filename
@@ -232,7 +253,7 @@ def upload_grn_stream(
         try:
             result = ingest_grn(
                 file_path=tmp_path, org_id=org_id, db=db,
-                on_progress=on_progress, replace=replace,
+                on_progress=on_progress, replace=replace, period=period,
             )
             recon_pairs.extend(_recon_pairs(db, org_id, result.affected_periods))
             progress_queue.put({

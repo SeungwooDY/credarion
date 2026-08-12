@@ -58,9 +58,13 @@ const FIELD_LABEL_KEYS: Record<string, string> = {
 // is in; afterwards reachable via the top-right "Re-upload ERP" modal.
 function GRNUploadCard({
   orgId,
+  period,
   onUploaded,
 }: {
   orgId: string;
+  /** Accounting month the export is uploaded FOR — stamped onto every row;
+      reconciliation scopes pairing by this tag, not by the rows' dates. */
+  period: string;
   onUploaded?: () => void;
 }) {
   const t = useT();
@@ -84,6 +88,7 @@ function GRNUploadCard({
     const fd = new FormData();
     fd.append("file", grnFile);
     fd.append("org_id", orgId);
+    if (period) fd.append("period", period);
     if (grnReplace) fd.append("replace", "true");
 
     try {
@@ -380,7 +385,7 @@ export default function IngestionPage() {
           <div className="mb-4 text-xs p-3 rounded-lg border border-blue-200 bg-blue-50 text-blue-800">
             {t("ingestion.erp_first_hint", { period: globalPeriod })}
           </div>
-          <GRNUploadCard orgId={orgId} onUploaded={refreshErpStatus} />
+          <GRNUploadCard orgId={orgId} period={globalPeriod} onUploaded={refreshErpStatus} />
         </div>
       )}
 
@@ -725,7 +730,7 @@ export default function IngestionPage() {
             className="w-full max-w-lg"
             onClick={(e) => e.stopPropagation()}
           >
-            <GRNUploadCard orgId={orgId} onUploaded={refreshErpStatus} />
+            <GRNUploadCard orgId={orgId} period={globalPeriod} onUploaded={refreshErpStatus} />
             <button
               onClick={() => setErpModalOpen(false)}
               className="mt-3 px-4 py-2 border border-border bg-card rounded-lg text-sm text-zinc-600 hover:bg-muted transition-colors"

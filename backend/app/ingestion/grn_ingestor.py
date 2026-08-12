@@ -181,6 +181,7 @@ def ingest_grn(
     db: Session,
     on_progress: object = None,
     replace: bool = False,
+    period: str | None = None,
 ) -> GRNIngestionResult:
     """Full ingestion pipeline for SGWERP GRN CSV export.
 
@@ -194,6 +195,11 @@ def ingest_grn(
             migration 0009 (old column scales rounded at insert). Existing
             reconciliation results keep working (FK is SET NULL); re-run
             reconciliation afterwards.
+        period: accounting month ("YYYY-MM") this export was uploaded FOR.
+            Every ingested row is stamped with it — reconciliation scopes
+            pairing by this tag, never by grn_date (monthly exports contain
+            overflowed dates). When omitted (API callers), falls back to the
+            dominant grn_date month in the file so rows stay one batch.
 
     Returns:
         GRNIngestionResult with status, counts, and any errors.
@@ -377,20 +383,32 @@ def ingest_grn(
         )
     if on_progress:
         on_progress("saving", 0, len(records), f"Saving {len(records)} records to database...")
+    # Resolve the batch's accounting month: caller-provided, else the
+    # dominant grn_date month in the file (keeps overflowed-date stragglers
+    # with their batch instead of scattering them across months).
+    resolved_period = period
+    if resolved_period is None and records:
+        month_counts: dict[str, int] = {}
+        for r in records:
+            if r.grn_date is not None:
+                m = f"{r.grn_date.year:04d}-{r.grn_date.month:02d}"
+                month_counts[m] = month_counts.get(m, 0) + 1
+        if month_counts:
+            resolved_period = max(month_counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
+    for r in records:
+        r.period = resolved_period
+
     db.add_all(records)
     result.rows_ingested = len(records)
     result.rows_skipped = skipped
     result.rows_duplicate = duplicates
     result.rows_replaced = replaced
     result.status = "success"
-    result.affected_periods = sorted(
-        {
-            (r.supplier_id, f"{r.grn_date.year:04d}-{r.grn_date.month:02d}")
-            for r in records
-            if r.grn_date is not None
-        },
-        key=lambda pair: (str(pair[0]), pair[1]),
-    )
+    if resolved_period is not None:
+        result.affected_periods = sorted(
+            {(r.supplier_id, resolved_period) for r in records},
+            key=lambda pair: (str(pair[0]), pair[1]),
+        )
 
     db.commit()
     if on_progress:

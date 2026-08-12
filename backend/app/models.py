@@ -167,6 +167,13 @@ class ERPRecord(Base):
     source_file: Mapped[str] = mapped_column(String, nullable=False)
     raw_row: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
 
+    # Accounting month this row was uploaded FOR ("YYYY-MM"). Reconciliation
+    # scopes pairing by this tag, never by grn_date — monthly ERP exports
+    # routinely contain rows dated in neighbouring months ("overflowed
+    # dates"), and those belong with their batch. Nullable for legacy rows;
+    # pairing falls back to the grn_date month for untagged rows.
+    period: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

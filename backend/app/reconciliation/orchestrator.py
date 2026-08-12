@@ -19,7 +19,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import desc, or_
+from sqlalchemy import and_, desc, or_
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -475,20 +475,29 @@ async def run_reconciliation(
     db.flush()
 
     try:
-        # Load ERP records for supplier+period
+        # Load ERP records for supplier+period. Scope is the upload's PERIOD
+        # TAG, never grn_date: monthly exports contain overflowed dates (a
+        # "March" export carries late-February receipts) and ERP bookings can
+        # trail supplier records by weeks. Dates only combine rows and break
+        # ties. Legacy untagged rows fall back to their grn_date month.
         period_start, period_end = _period_date_range(period)
         logger.info(
-            "[RECON DEBUG] Starting reconciliation: supplier_id=%s, period=%s, "
-            "date_range=%s to %s",
-            supplier_id, period, period_start, period_end,
+            "[RECON DEBUG] Starting reconciliation: supplier_id=%s, period=%s",
+            supplier_id, period,
         )
 
         erp_records = (
             db.query(ERPRecord)
             .filter(
                 ERPRecord.supplier_id == supplier_id,
-                ERPRecord.grn_date >= period_start,
-                ERPRecord.grn_date <= period_end,
+                or_(
+                    ERPRecord.period == period,
+                    and_(
+                        ERPRecord.period.is_(None),
+                        ERPRecord.grn_date >= period_start,
+                        ERPRecord.grn_date <= period_end,
+                    ),
+                ),
             )
             .all()
         )
