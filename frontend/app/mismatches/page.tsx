@@ -341,6 +341,47 @@ function ResolveModal({
   );
 }
 
+// Simple yes/no confirmation — used for unmark/unresolve, where no reason is
+// required but the action permanently discards the previously entered note.
+function ConfirmModal({
+  title,
+  note,
+  onConfirm,
+  onClose,
+}: {
+  title: string;
+  note: string;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  const t = useT();
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-card rounded-2xl shadow-xl w-full max-w-sm p-5" onClick={(e) => e.stopPropagation()}>
+        <h3 className="font-semibold text-sm mb-2">{title}</h3>
+        <p className="text-xs text-zinc-500 mb-4">{note}</p>
+        <div className="flex gap-2 justify-end">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 text-xs border border-border rounded-lg hover:bg-muted transition-colors"
+          >
+            {t("common.no")}
+          </button>
+          <button
+            onClick={() => {
+              onConfirm();
+              onClose();
+            }}
+            className="px-3 py-1.5 text-xs rounded-lg bg-red-500 text-white hover:bg-red-600 transition-colors"
+          >
+            {t("common.yes")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MarkDiscrepancyModal({
   item,
   onClose,
@@ -440,12 +481,26 @@ function SupplierCard({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [resolveItems, setResolveItems] = useState<MismatchItem[] | null>(null);
   const [markItem, setMarkItem] = useState<MismatchItem | null>(null);
+  const [confirmAction, setConfirmAction] = useState<
+    { type: "unmark" | "unresolve"; item: MismatchItem } | null
+  >(null);
   const [escalateItem, setEscalateItem] = useState<MismatchItem | null>(null);
   const [escalatedOk, setEscalatedOk] = useState(false);
 
   async function unmarkDiscrepancy(item: MismatchItem) {
     try {
       const res = await fetch(`/api/v1/reconciliation/results/${item.id}/mark-discrepancy`, {
+        method: "DELETE",
+      });
+      if (res.ok) onItemsChanged();
+    } catch {
+      // non-fatal; user can retry
+    }
+  }
+
+  async function unresolveResult(item: MismatchItem) {
+    try {
+      const res = await fetch(`/api/v1/reconciliation/results/${item.id}/resolve`, {
         method: "DELETE",
       });
       if (res.ok) onItemsChanged();
@@ -742,15 +797,6 @@ function SupplierCard({
                         ) : (
                           <DiscrepancyLabel type={item.discrepancy_type} />
                         )}
-                        {item.marked_discrepancy_reason && (
-                          <span
-                            className="ml-1 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium text-amber-700 bg-amber-50 border border-amber-300 cursor-help align-middle"
-                            title={item.marked_discrepancy_reason}
-                          >
-                            <span aria-hidden>⚑</span>
-                            {t("mismatches.marked_badge")}
-                          </span>
-                        )}
                         {md?.carryover_from && (
                           <span
                             className="ml-1 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium text-sky-600 bg-sky-50 border border-sky-200 cursor-help align-middle"
@@ -835,11 +881,21 @@ function SupplierCard({
                         )}
                       </td>
                       <td className="px-3 py-2 text-center">
+                        {isResolved && (
+                          <button
+                            onClick={() => setConfirmAction({ type: "unresolve", item })}
+                            disabled={locked}
+                            title={locked ? t("lock.action_blocked") : undefined}
+                            className="px-1.5 py-0.5 text-[11px] text-zinc-400 hover:text-amber-700 hover:bg-amber-50 rounded-lg transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {t("mismatches.unresolve")}
+                          </button>
+                        )}
                         {!isResolved && !isMatch && (
                           <div className="flex items-center justify-center gap-1.5">
                             {item.marked_discrepancy_reason ? (
                               <button
-                                onClick={() => unmarkDiscrepancy(item)}
+                                onClick={() => setConfirmAction({ type: "unmark", item })}
                                 disabled={locked}
                                 title={locked ? t("lock.action_blocked") : t("mismatches.unmark_tooltip")}
                                 className="px-2.5 py-1 text-xs font-medium bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-50 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
@@ -901,6 +957,26 @@ function SupplierCard({
           item={markItem}
           onClose={() => setMarkItem(null)}
           onMarked={onItemsChanged}
+        />
+      )}
+      {confirmAction && (
+        <ConfirmModal
+          title={
+            confirmAction.type === "unmark"
+              ? t("mismatches.unmark_confirm_title")
+              : t("mismatches.unresolve_confirm_title")
+          }
+          note={
+            confirmAction.type === "unmark"
+              ? t("mismatches.unmark_confirm_note")
+              : t("mismatches.unresolve_confirm_note")
+          }
+          onConfirm={() =>
+            confirmAction.type === "unmark"
+              ? unmarkDiscrepancy(confirmAction.item)
+              : unresolveResult(confirmAction.item)
+          }
+          onClose={() => setConfirmAction(null)}
         />
       )}
       {escalateItem && (

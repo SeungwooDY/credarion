@@ -654,6 +654,34 @@ def resolve_result(
     return _result_to_detail(r)
 
 
+@router.delete("/results/{result_id}/resolve", response_model=ResultDetail)
+def unresolve_result(
+    result_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ResultDetail:
+    """Revert a resolution (mistaken clicks must be reversible).
+
+    Clears the resolution note/author/timestamp and reopens the row —
+    back to "unmatched" for unmatched rows, "pending_review" otherwise.
+    """
+    r = db.query(ReconciliationResult).filter(ReconciliationResult.id == result_id).first()
+    if not r:
+        raise HTTPException(status_code=404, detail="Result not found")
+    authorize_supplier(db, user, r.supplier_id)
+    ensure_result_period_unlocked(db, r)
+    if r.status != "resolved":
+        raise HTTPException(status_code=400, detail="Result is not resolved")
+
+    r.status = "unmatched" if r.match_type == "unmatched" else "pending_review"
+    r.resolution_note = None
+    r.resolved_by = None
+    r.resolved_at = None
+    db.commit()
+    db.refresh(r)
+    return _result_to_detail(r)
+
+
 @router.put("/results/{result_id}/mark-discrepancy", response_model=ResultDetail)
 def mark_discrepancy(
     result_id: uuid.UUID,
