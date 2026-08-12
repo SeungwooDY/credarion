@@ -12,6 +12,10 @@ const LABEL_KEYS: Record<string, string> = {
   discrepancy: "common.status.discrepancy",
   success: "statusBadge.success",
   error: "common.status.error",
+  pending_review: "statusBadge.pending_review",
+  unmatched: "statusBadge.unmatched",
+  rejected: "statusBadge.rejected",
+  confirmed: "statusBadge.confirmed",
 };
 
 const COLORS: Record<string, string> = {
@@ -26,6 +30,10 @@ const COLORS: Record<string, string> = {
   discrepancy: "bg-orange-50 text-orange-700",
   success: "bg-green-50 text-green-700",
   error: "bg-red-50 text-red-700",
+  pending_review: "bg-sky-50 text-sky-700",
+  unmatched: "bg-red-50 text-red-700",
+  rejected: "bg-amber-50 text-amber-700",
+  confirmed: "bg-emerald-50 text-emerald-700",
 };
 
 export default function StatusBadge({ status }: { status: string }) {

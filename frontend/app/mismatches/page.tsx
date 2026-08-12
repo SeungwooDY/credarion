@@ -707,13 +707,16 @@ function SupplierCard({
                   const md = item.match_details;
                   const isUnmatched = item.match_type === "unmatched";
                   const isResolved = item.status === "resolved";
+                  const isMarked = !isResolved && !!item.marked_discrepancy_reason;
                   const rowBg = isMatch
                     ? "bg-green-50/40"
                     : isResolved
                       ? "bg-green-50/30"
-                      : isUnmatched
-                        ? "bg-red-50/30"
-                        : "";
+                      : isMarked
+                        ? "bg-amber-50/40"
+                        : isUnmatched
+                          ? "bg-red-50/30"
+                          : "";
 
                   return (
                     <tr
@@ -819,6 +822,13 @@ function SupplierCard({
                             title={item.resolution_note || ""}
                           >
                             {t("mismatches.resolved")}
+                          </span>
+                        ) : isMarked ? (
+                          <span
+                            className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200 cursor-help"
+                            title={item.marked_discrepancy_reason || ""}
+                          >
+                            ⚑ {t("mismatches.flagged_status")}
                           </span>
                         ) : (
                           <StatusBadge status={item.status} />
