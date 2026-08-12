@@ -2,8 +2,11 @@
 
 import { Suspense, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { LanguageToggle } from "@/components/ui/language-toggle";
+import { useT } from "@/app/lib/i18n";
 
 function LoginForm() {
+  const t = useT();
   const searchParams = useSearchParams();
   const nextPath = searchParams.get("next") || "/";
 
@@ -29,8 +32,8 @@ function LoginForm() {
         setError(
           body.detail ||
             (res.status === 401
-              ? "Invalid email or password"
-              : "Unable to sign in. Please try again."),
+              ? t("login.error_invalid")
+              : t("login.error_generic")),
         );
         setSubmitting(false);
         return;
@@ -40,7 +43,7 @@ function LoginForm() {
       const safeNext = nextPath.startsWith("/") ? nextPath : "/";
       window.location.assign(safeNext);
     } catch {
-      setError("Network error. Please check your connection and try again.");
+      setError(t("login.error_network"));
       setSubmitting(false);
     }
   }
@@ -49,7 +52,7 @@ function LoginForm() {
     <form onSubmit={handleSubmit} className="space-y-5">
       <div className="space-y-1.5">
         <label htmlFor="email" className="block text-sm font-medium text-zinc-700">
-          Work email
+          {t("login.email_label")}
         </label>
         <input
           id="email"
@@ -65,7 +68,7 @@ function LoginForm() {
 
       <div className="space-y-1.5">
         <label htmlFor="password" className="block text-sm font-medium text-zinc-700">
-          Password
+          {t("login.password_label")}
         </label>
         <input
           id="password"
@@ -90,33 +93,37 @@ function LoginForm() {
         disabled={submitting}
         className="w-full rounded-xl bg-gradient-to-br from-[#7c4dff] via-accent to-accent-dark px-4 py-2.5 text-sm font-semibold text-white shadow-[0_4px_14px_rgba(108,60,224,0.35)] transition hover:shadow-[0_6px_20px_rgba(108,60,224,0.45)] disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {submitting ? "Signing in…" : "Sign in"}
+        {submitting ? t("login.signing_in") : t("login.sign_in")}
       </button>
     </form>
   );
 }
 
 export default function LoginPage() {
+  const t = useT();
   return (
     <div className="min-h-screen w-full bg-background flex items-center justify-center p-6">
       <div className="w-full max-w-sm">
-        {/* Brand */}
-        <div className="mb-8 flex items-center gap-2.5">
-          <img src="/logo.png" alt="Credarion" className="h-9 w-9 shrink-0" />
-          <div>
-            <h1 className="text-base font-semibold tracking-tight text-foreground">
-              Credarion
-            </h1>
-            <p className="text-[10px] uppercase leading-none tracking-wide text-zinc-400">
-              Accounting Co-pilot
-            </p>
+        {/* Brand + language toggle */}
+        <div className="mb-8 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <img src="/logo.png" alt="Credarion" className="h-9 w-9 shrink-0" />
+            <div>
+              <h1 className="text-base font-semibold tracking-tight text-foreground">
+                Credarion
+              </h1>
+              <p className="text-[10px] uppercase leading-none tracking-wide text-zinc-400">
+                Accounting Co-pilot
+              </p>
+            </div>
           </div>
+          <LanguageToggle />
         </div>
 
         <div className="rounded-2xl border border-border bg-card p-7 shadow-[0_4px_24px_rgba(26,26,46,0.06)]">
-          <h2 className="text-lg font-semibold text-zinc-800">Welcome back</h2>
+          <h2 className="text-lg font-semibold text-zinc-800">{t("login.welcome")}</h2>
           <p className="mb-6 mt-1 text-sm text-zinc-500">
-            Sign in to your account to continue.
+            {t("login.subtitle")}
           </p>
 
           <Suspense fallback={null}>
@@ -125,7 +132,7 @@ export default function LoginPage() {
         </div>
 
         <p className="mt-6 text-center text-xs text-zinc-400">
-          Trouble signing in? Contact your account manager.
+          {t("login.help")}
         </p>
       </div>
     </div>

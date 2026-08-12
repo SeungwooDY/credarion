@@ -202,6 +202,18 @@ const en: Record<string, string> = {
   "dashboard.fallback.discrepancy": "Discrepancy detected. Review required.",
   "dashboard.fallback.matched": "Fully matched. ¥0 discrepancy.",
 
+  // ── login ──
+  "login.welcome": "Welcome back",
+  "login.subtitle": "Sign in to your account to continue.",
+  "login.email_label": "Work email",
+  "login.password_label": "Password",
+  "login.sign_in": "Sign in",
+  "login.signing_in": "Signing in…",
+  "login.error_invalid": "Invalid email or password",
+  "login.error_generic": "Unable to sign in. Please try again.",
+  "login.error_network": "Network error. Please check your connection and try again.",
+  "login.help": "Trouble signing in? Contact your account manager.",
+
   // ── data ingestion ──
   "ingestion.title": "Data Ingestion",
   "ingestion.description": "Upload ERP goods receipt exports and supplier reconciliation statements",
@@ -763,6 +775,18 @@ const zh: Record<string, string> = {
   "dashboard.fallback.in_review": "标记项待复核。",
   "dashboard.fallback.discrepancy": "检测到差异，需复核。",
   "dashboard.fallback.matched": "完全匹配，差异为 ¥0。",
+
+  // ── login ──
+  "login.welcome": "欢迎回来",
+  "login.subtitle": "登录您的账户以继续。",
+  "login.email_label": "工作邮箱",
+  "login.password_label": "密码",
+  "login.sign_in": "登录",
+  "login.signing_in": "登录中…",
+  "login.error_invalid": "邮箱或密码不正确",
+  "login.error_generic": "无法登录，请重试。",
+  "login.error_network": "网络错误，请检查网络连接后重试。",
+  "login.help": "登录遇到问题？请联系您的客户经理。",
 
   // ── data ingestion ──
   "ingestion.title": "数据导入",
