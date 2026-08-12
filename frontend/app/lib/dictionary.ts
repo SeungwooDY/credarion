@@ -279,6 +279,10 @@ const en: Record<string, string> = {
   "ingestion.status_error": "Failed",
   "ingestion.auto_recon_note":
     "Reconciliation is running automatically in the background — results will appear on the Mismatches page shortly.",
+  "ingestion.erp_first_hint":
+    "Upload the ERP/GRN export for {period} first. Supplier statement upload unlocks once this month's receipts are in — statements need the suppliers and receipt records the ERP upload creates.",
+  "ingestion.erp_rows_loaded": "{n} ERP rows loaded this month",
+  "ingestion.reupload_erp": "Re-upload ERP",
 
   // ── reconciliation ──
   "reconciliation.title": "Reconciliation",
@@ -868,6 +872,10 @@ const zh: Record<string, string> = {
   "ingestion.status_error": "失败",
   "ingestion.auto_recon_note":
     "系统正在后台自动对账——结果稍后将显示在差异页面。",
+  "ingestion.erp_first_hint":
+    "请先上传 {period} 的 ERP/GRN 导出文件。本月收货数据导入后即可上传供应商对账单——对账单需要 ERP 上传创建的供应商和收货记录。",
+  "ingestion.erp_rows_loaded": "本月已导入 {n} 行 ERP 数据",
+  "ingestion.reupload_erp": "重新上传 ERP",
 
   // ── reconciliation ──
   "reconciliation.title": "对账",

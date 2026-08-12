@@ -383,6 +383,30 @@ export function usePeriods(orgId: string) {
   };
 }
 
+interface ERPStatus {
+  has_data: boolean;
+  row_count: number;
+}
+
+/**
+ * Whether ERP/GRN rows exist for the org in the given month. The ingestion
+ * page gates statement upload on this (ERP export first).
+ */
+export function useErpStatus(orgId: string, period: string) {
+  const { data, error, isLoading, mutate } = useSWR<ERPStatus>(
+    orgId && period ? `/erp/status?org_id=${orgId}&period=${period}` : null,
+    fetcher,
+    swrDefaults
+  );
+  return {
+    hasErpData: data?.has_data ?? false,
+    erpRowCount: data?.row_count ?? 0,
+    erpStatusLoading: isLoading,
+    erpStatusError: error,
+    refreshErpStatus: () => mutate(),
+  };
+}
+
 // ── Team management ──────────────────────────────────────────
 
 export interface TeamMember {

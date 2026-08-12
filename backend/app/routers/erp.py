@@ -1,6 +1,7 @@
 """API endpoints for SGWERP GRN (Goods Receipt Note) ingestion."""
 from __future__ import annotations
 
+import calendar
 import json
 import logging
 import queue
@@ -8,6 +9,7 @@ import shutil
 import tempfile
 import threading
 import uuid
+from datetime import datetime
 
 from fastapi import (
     APIRouter,
@@ -16,6 +18,7 @@ from fastapi import (
     File,
     Form,
     HTTPException,
+    Query,
     UploadFile,
 )
 from fastapi.responses import StreamingResponse
@@ -25,7 +28,8 @@ from sqlalchemy.orm import Session
 from app.auth_deps import authorize_org, get_current_user
 from app.db import SessionLocal, get_db
 from app.ingestion.grn_ingestor import GRNIngestionResult, ingest_grn
-from app.models import PeriodSignoff, SupplierStatement, User
+from app.models import ERPRecord, PeriodSignoff, SupplierStatement, User
+from app.periods import validate_period
 from app.reconciliation.auto_run import auto_reconcile
 
 logger = logging.getLogger(__name__)
@@ -82,6 +86,44 @@ class GRNIngestionResponse(BaseModel):
     suppliers_created: int = 0
     suppliers_existing: int = 0
     errors: list[str] = []
+
+
+class ERPStatusResponse(BaseModel):
+    has_data: bool
+    row_count: int
+
+
+@router.get("/status", response_model=ERPStatusResponse)
+def erp_status(
+    org_id: uuid.UUID = Query(...),
+    period: str = Query(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> ERPStatusResponse:
+    """Whether the org has ERP/GRN rows dated inside the given month.
+
+    The ingestion page gates statement upload on this: ERP export first,
+    then supplier statements (statements need the suppliers + receipts the
+    GRN upload creates).
+    """
+    authorize_org(db, user, org_id)
+    try:
+        validate_period(period)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    year, month = map(int, period.split("-"))
+    start = datetime(year, month, 1)
+    end = datetime(year, month, calendar.monthrange(year, month)[1], 23, 59, 59)
+    count = (
+        db.query(ERPRecord)
+        .filter(
+            ERPRecord.org_id == org_id,
+            ERPRecord.grn_date >= start,
+            ERPRecord.grn_date <= end,
+        )
+        .count()
+    )
+    return ERPStatusResponse(has_data=count > 0, row_count=count)
 
 
 @router.post("/upload", response_model=GRNIngestionResponse, status_code=201)

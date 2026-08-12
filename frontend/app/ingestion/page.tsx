@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import PageHeader from "../components/page-header";
-import { useCurrentOrg } from "../lib/swr";
+import { useCurrentOrg, useErpStatus } from "../lib/swr";
 import { usePeriod } from "../lib/period";
 import { PeriodBadge } from "../components/period-switcher";
 import { CARD } from "@/app/lib/ui";
@@ -54,26 +54,28 @@ const FIELD_LABEL_KEYS: Record<string, string> = {
   delivery_note_ref: "ingestion.field_delivery_note",
 };
 
-export default function IngestionPage() {
+// ERP/GRN upload card — the page's sole content until this month's ERP data
+// is in; afterwards reachable via the top-right "Re-upload ERP" modal.
+function GRNUploadCard({
+  orgId,
+  onUploaded,
+}: {
+  orgId: string;
+  onUploaded?: () => void;
+}) {
   const t = useT();
-  const { orgId } = useCurrentOrg();
-  const { period: globalPeriod } = usePeriod();
-
   const [grnFile, setGrnFile] = useState<File | null>(null);
   const [grnStatus, setGrnStatus] = useState("");
   const [grnLoading, setGrnLoading] = useState(false);
   const [grnReplace, setGrnReplace] = useState(false);
 
-  const [stmtFiles, setStmtFiles] = useState<File[]>([]);
-  const [stmtIdx, setStmtIdx] = useState(0);
-  const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
-  const [stmtStep, setStmtStep] = useState<"select" | "preview" | "done">("select");
-  const [stmtLoading, setStmtLoading] = useState(false);
-  const [stmtError, setStmtError] = useState("");
-  const [preview, setPreview] = useState<PreviewData | null>(null);
-
-  const [selectedPeriod, setSelectedPeriod] = useState("");
-  const [duplicateInfo, setDuplicateInfo] = useState<DuplicateInfo | null>(null);
+  const dzLabels = {
+    click: t("ingestion.dropzone_click"),
+    hint: t("ingestion.dropzone_hint"),
+    formats: t("ingestion.dropzone_formats"),
+    replace: t("ingestion.dropzone_replace"),
+    remove: t("ingestion.dropzone_remove"),
+  };
 
   async function uploadGRN() {
     if (!grnFile || !orgId) return;
@@ -133,11 +135,83 @@ export default function IngestionPage() {
       }
 
       setGrnStatus(finalResult || t("ingestion.upload_complete"));
+      onUploaded?.();
     } catch (e) {
       setGrnStatus(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
     setGrnLoading(false);
   }
+
+  return (
+    <div className={`${CARD} p-5`}>
+      <h3 className="font-semibold text-sm mb-1">{t("ingestion.grn_card_title")}</h3>
+      <p className="text-xs text-zinc-500 mb-4">
+        {t("ingestion.grn_card_help")}
+      </p>
+
+      <label className="block text-xs font-medium mb-1">{t("ingestion.grn_file")}</label>
+      <FileDropzone
+        file={grnFile}
+        accept=".csv,.xlsx,.xls"
+        onSelect={setGrnFile}
+        onRemove={() => setGrnFile(null)}
+        disabled={grnLoading}
+        labels={dzLabels}
+        className="mb-3"
+      />
+
+      <label className="flex items-center gap-2 mb-3 text-xs text-zinc-600 cursor-pointer select-none">
+        <input
+          type="checkbox"
+          checked={grnReplace}
+          onChange={(e) => setGrnReplace(e.target.checked)}
+          disabled={grnLoading}
+          className="rounded"
+        />
+        {t("ingestion.grn_replace_existing")}
+      </label>
+
+      <button
+        onClick={uploadGRN}
+        disabled={!grnFile || !orgId || grnLoading}
+        className="px-4 py-2 bg-accent hover:bg-accent-dark text-white rounded-lg text-sm disabled:opacity-40 transition-colors"
+      >
+        {grnLoading ? t("ingestion.uploading") : t("ingestion.upload_grn")}
+      </button>
+
+      {grnStatus && (
+        <div
+          className={`mt-3 text-xs p-3 rounded-lg font-mono whitespace-pre-wrap ${
+            grnStatus.startsWith("Error")
+              ? "bg-red-50 text-red-700 border border-red-200"
+              : "bg-green-50 text-green-700 border border-green-200"
+          }`}
+        >
+          {grnStatus}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function IngestionPage() {
+  const t = useT();
+  const { orgId } = useCurrentOrg();
+  const { period: globalPeriod } = usePeriod();
+  const { hasErpData, erpRowCount, erpStatusLoading, refreshErpStatus } =
+    useErpStatus(orgId, globalPeriod);
+  const [erpModalOpen, setErpModalOpen] = useState(false);
+
+  const [stmtFiles, setStmtFiles] = useState<File[]>([]);
+  const [stmtIdx, setStmtIdx] = useState(0);
+  const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
+  const [stmtStep, setStmtStep] = useState<"select" | "preview" | "done">("select");
+  const [stmtLoading, setStmtLoading] = useState(false);
+  const [stmtError, setStmtError] = useState("");
+  const [preview, setPreview] = useState<PreviewData | null>(null);
+
+  const [selectedPeriod, setSelectedPeriod] = useState("");
+  const [duplicateInfo, setDuplicateInfo] = useState<DuplicateInfo | null>(null);
 
   // Record the outcome for file `idx`, then preview the next file in the
   // queue or show the summary when the batch is exhausted.
@@ -281,62 +355,37 @@ export default function IngestionPage() {
         description={t("ingestion.description")}
       />
 
-      {/* Active period (switch months from the sidebar) */}
-      <div className="mb-6">
+      {/* Active period + ERP re-upload (top-right, once ERP data is in) */}
+      <div className="mb-6 flex items-center justify-between">
         <PeriodBadge />
+        {hasErpData && (
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-zinc-400">
+              {t("ingestion.erp_rows_loaded", { n: erpRowCount })}
+            </span>
+            <button
+              onClick={() => setErpModalOpen(true)}
+              className="px-3 py-1.5 text-xs border border-border rounded-lg text-zinc-600 hover:bg-muted transition-colors"
+            >
+              {t("ingestion.reupload_erp")}
+            </button>
+          </div>
+        )}
       </div>
 
-      <div className="grid grid-cols-2 gap-6">
-        {/* GRN Upload */}
-        <div className={`${CARD} p-5`}>
-          <h3 className="font-semibold text-sm mb-1">{t("ingestion.grn_card_title")}</h3>
-          <p className="text-xs text-zinc-500 mb-4">
-            {t("ingestion.grn_card_help")}
-          </p>
-
-          <label className="block text-xs font-medium mb-1">{t("ingestion.grn_file")}</label>
-          <FileDropzone
-            file={grnFile}
-            accept=".csv,.xlsx,.xls"
-            onSelect={setGrnFile}
-            onRemove={() => setGrnFile(null)}
-            disabled={grnLoading}
-            labels={dzLabels}
-            className="mb-3"
-          />
-
-          <label className="flex items-center gap-2 mb-3 text-xs text-zinc-600 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={grnReplace}
-              onChange={(e) => setGrnReplace(e.target.checked)}
-              disabled={grnLoading}
-              className="rounded"
-            />
-            {t("ingestion.grn_replace_existing")}
-          </label>
-
-          <button
-            onClick={uploadGRN}
-            disabled={!grnFile || !orgId || grnLoading}
-            className="px-4 py-2 bg-accent hover:bg-accent-dark text-white rounded-lg text-sm disabled:opacity-40 transition-colors"
-          >
-            {grnLoading ? t("ingestion.uploading") : t("ingestion.upload_grn")}
-          </button>
-
-          {grnStatus && (
-            <div
-              className={`mt-3 text-xs p-3 rounded-lg font-mono whitespace-pre-wrap ${
-                grnStatus.startsWith("Error")
-                  ? "bg-red-50 text-red-700 border border-red-200"
-                  : "bg-green-50 text-green-700 border border-green-200"
-              }`}
-            >
-              {grnStatus}
-            </div>
-          )}
+      {/* Gate: ERP export first — statements unlock once this month's
+          receipts are in (they need the suppliers + GRN rows to match). */}
+      {!hasErpData && !erpStatusLoading && (
+        <div className="max-w-xl">
+          <div className="mb-4 text-xs p-3 rounded-lg border border-blue-200 bg-blue-50 text-blue-800">
+            {t("ingestion.erp_first_hint", { period: globalPeriod })}
+          </div>
+          <GRNUploadCard orgId={orgId} onUploaded={refreshErpStatus} />
         </div>
+      )}
 
+      {hasErpData && (
+        <div className="max-w-2xl">
         {/* Statement Upload */}
         <div className={`${CARD} p-5`}>
           <h3 className="font-semibold text-sm mb-1">{t("ingestion.stmt_card_title")}</h3>
@@ -663,7 +712,29 @@ export default function IngestionPage() {
             </div>
           )}
         </div>
-      </div>
+        </div>
+      )}
+
+      {/* Re-upload ERP modal */}
+      {erpModalOpen && (
+        <div
+          className="fixed inset-0 bg-black/30 flex items-center justify-center z-50 p-6"
+          onClick={() => setErpModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-lg"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <GRNUploadCard orgId={orgId} onUploaded={refreshErpStatus} />
+            <button
+              onClick={() => setErpModalOpen(false)}
+              className="mt-3 px-4 py-2 border border-border bg-card rounded-lg text-sm text-zinc-600 hover:bg-muted transition-colors"
+            >
+              {t("common.close")}
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 }
