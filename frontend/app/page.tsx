@@ -4,7 +4,6 @@ import Link from "next/link";
 import { getLocalTimeZone } from "@internationalized/date";
 import PageHeader from "./components/page-header";
 import SignoffCard from "./components/signoff-card";
-import { RoadmapCard, type RoadmapItem } from "@/components/ui/roadmap-card";
 import { CloseDatePicker } from "@/components/ui/close-date-picker";
 import { CARD } from "./lib/ui";
 import { useCloseDate } from "./lib/close-date";
@@ -186,39 +185,6 @@ export default function DashboardPage() {
   // yet ("pending") — they still count toward the stat-card totals above.
   const overviewRows = suppliers.filter((s) => s.status !== "pending");
 
-  // Month-end close pipeline. Supplier Reconciliation is the live stage (shows
-  // matched/total); the rest unlock sequentially and stay "Not Started" for now.
-  const closeLoading = suppliersLoading && total === 0;
-  const closeStages: RoadmapItem[] = [
-    {
-      quarter: t("dashboard.step", { n: 1 }),
-      title: t("dashboard.stage.supplier_recon"),
-      description: closeLoading
-        ? t("common.loading")
-        : t("dashboard.stage_complete", { n: matched, total }),
-      status: "in-progress",
-    },
-    // Invoice Matching stage hidden for now — restore (and renumber) for Phase 2.
-    // {
-    //   quarter: t("dashboard.step", { n: 2 }),
-    //   title: t("dashboard.stage.invoice_matching"),
-    //   description: t("dashboard.not_started"),
-    //   status: "upcoming",
-    // },
-    {
-      quarter: t("dashboard.step", { n: 2 }),
-      title: t("dashboard.stage.discrepancy_resolution"),
-      description: t("dashboard.not_started"),
-      status: "upcoming",
-    },
-    {
-      quarter: t("dashboard.step", { n: 3 }),
-      title: t("dashboard.stage.cfo_signoff"),
-      description: t("dashboard.not_started"),
-      status: "upcoming",
-    },
-  ];
-
   const daysColor =
     daysLeft === null
       ? "text-gray-800"
@@ -395,19 +361,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* ── Section 3: Month-end close progress ── */}
-      <RoadmapCard
-        className="mt-6"
-        title={t("dashboard.close_progress_title")}
-        description={
-          closeLoading
-            ? t("common.loading")
-            : t("dashboard.close_progress_note", { matched, total })
-        }
-        items={closeStages}
-      />
-
-      {/* ── Section 4: Supplier overview table ── */}
+      {/* ── Section 3: Supplier overview table ── */}
       <div className={`${CARD} mt-6`}>
         <div className="border-b border-gray-100 px-5 py-4">
           <h3 className="text-base font-semibold text-gray-800">{t("dashboard.supplier_overview")}</h3>
