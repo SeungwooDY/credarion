@@ -108,14 +108,9 @@ export default function LoginPage() {
         <div className="mb-8 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
             <img src="/logo.png" alt="Credarion" className="h-9 w-9 shrink-0" />
-            <div>
-              <h1 className="text-base font-semibold tracking-tight text-foreground">
-                Credarion
-              </h1>
-              <p className="text-[10px] uppercase leading-none tracking-wide text-zinc-400">
-                Accounting Co-pilot
-              </p>
-            </div>
+            <h1 className="text-base font-semibold tracking-tight text-foreground">
+              Credarion
+            </h1>
           </div>
           <LanguageToggle />
         </div>
