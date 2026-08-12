@@ -16,6 +16,9 @@ interface ReconConfigForm {
   ai_max_tokens_per_run: number;
 }
 
+// Widened to boolean so TS keeps checking (and null-narrowing) the hidden JSX.
+const SHOW_RECON_CONFIG: boolean = false;
+
 export default function SettingsPage() {
   const t = useT();
   const { orgId, orgName } = useCurrentOrg();
@@ -86,7 +89,11 @@ export default function SettingsPage() {
           )}
         </div>
 
-        {/* Reconciliation Config */}
+        {/* Reconciliation Config — hidden for now: reconciliation runs
+            automatically with the defaults (auto-resolve exact + AI layer ON,
+            0.5% tolerances). The backend endpoint and this form stay intact;
+            flip SHOW_RECON_CONFIG to restore. */}
+        {SHOW_RECON_CONFIG && (
         <div className={`${CARD} p-5`}>
           <h3 className="font-semibold text-sm mb-4">
             {t("settings.recon_config")}
@@ -207,6 +214,7 @@ export default function SettingsPage() {
             </div>
           )}
         </div>
+        )}
       </div>
 
       {/* Team management — admin only (component renders nothing otherwise) */}
