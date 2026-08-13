@@ -64,21 +64,17 @@ def test_next_period():
 
 
 def test_can_create_period_window():
-    # Current month: always creatable.
+    # Current month and any past month: always creatable.
     assert can_create_period("2026-08", today=date(2026, 8, 9)) is True
-    assert can_create_period("2026-08", today=date(2026, 8, 31)) is True
-    # Next month: opens 5 days before month end (Aug ends the 31st → the 26th).
-    assert can_create_period("2026-09", today=date(2026, 8, 25)) is False
-    assert can_create_period("2026-09", today=date(2026, 8, 26)) is True
-    assert can_create_period("2026-09", today=date(2026, 8, 31)) is True
-    # Short month: Feb 2026 ends the 28th → March opens on the 23rd.
-    assert can_create_period("2026-03", today=date(2026, 2, 22)) is False
-    assert can_create_period("2026-03", today=date(2026, 2, 23)) is True
-    # Year boundary.
-    assert can_create_period("2027-01", today=date(2026, 12, 27)) is True
-    # Past months and months beyond next: never creatable.
-    assert can_create_period("2026-07", today=date(2026, 8, 9)) is False
-    assert can_create_period("2026-10", today=date(2026, 8, 31)) is False
+    assert can_create_period("2026-07", today=date(2026, 8, 9)) is True
+    assert can_create_period("2020-01", today=date(2026, 8, 9)) is True
+    # Future months: creatable through December of next year.
+    assert can_create_period("2026-09", today=date(2026, 8, 9)) is True
+    assert can_create_period("2027-12", today=date(2026, 8, 9)) is True
+    assert can_create_period("2028-01", today=date(2026, 8, 9)) is False
+    # Year boundary: from December, next year is still "current year + 1".
+    assert can_create_period("2027-12", today=date(2026, 12, 27)) is True
+    assert can_create_period("2028-01", today=date(2026, 12, 27)) is False
 
 
 # --- endpoint ----------------------------------------------------------------
@@ -206,11 +202,11 @@ def test_create_duplicate_conflicts(client, db_session, tenant):
 
 def test_create_outside_window_rejected(client, tenant):
     login_as(tenant["accountant"])
-    # Past month and far-future month are never creatable via the endpoint.
+    # Past months are now creatable; beyond December of next year is not.
     past = "2020-01"
-    far_future = next_period(next_period(current_period()))
-    assert _create(client, tenant["org"].id, past).status_code == 422
-    assert _create(client, tenant["org"].id, far_future).status_code == 422
+    beyond_next_year = f"{date.today().year + 2}-01"
+    assert _create(client, tenant["org"].id, past).status_code == 201
+    assert _create(client, tenant["org"].id, beyond_next_year).status_code == 422
     assert _create(client, tenant["org"].id, "not-a-period").status_code == 422
 
 

@@ -63,17 +63,13 @@ def days_until_month_end(today: date | None = None) -> int:
 def can_create_period(period: str, today: date | None = None) -> bool:
     """Whether a period may be explicitly created today.
 
-    The current month is always creatable (so a missed window never locks the
-    team out of the month they are in). The next month opens up 5 days before
-    the current month ends — e.g. a month ending on the 31st becomes creatable
-    on the 26th. Anything else (past or further future) is not creatable:
-    past months come into existence through data uploads.
+    Any past or current month is creatable — teams reconcile historical
+    months, so the calendar is open backwards without limit. Future months
+    are creatable through December of NEXT year (current year + 1), which
+    covers setting up upcoming periods without letting users wander into
+    meaningless far-future months.
     """
     validate_period(period)
     d = today or date.today()
-    cur = current_period(d)
-    if period == cur:
-        return True
-    if period == next_period(cur):
-        return days_until_month_end(d) <= 5
-    return False
+    year = int(period.split("-")[0])
+    return year <= d.year + 1

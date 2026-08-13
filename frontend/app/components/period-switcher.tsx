@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarDays, Check, ChevronLeft, ChevronRight, Lock, Plus } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Lock } from "lucide-react";
 import { useLang, useT } from "@/app/lib/i18n";
-import { creatablePeriods, usePeriod } from "@/app/lib/period";
+import { usePeriod } from "@/app/lib/period";
 import { useCurrentOrg, usePeriods, useSignoff } from "@/app/lib/swr";
+import MonthPicker from "./month-picker";
 
 /** Localized "Mar 2026" / "2026年3月" label for a "YYYY-MM" period. */
 export function usePeriodLabel(period: string): string {
@@ -52,10 +53,10 @@ export function PeriodBadge() {
  *
  * Collapsed rail: calendar icon with the month number as a badge.
  * Expanded: ‹ label › steppers clamped to months that exist; the label opens
- * a dropdown of the org's periods (derived from data; locked months show a
- * lock icon) plus a "Create <month>" action when one is creatable — the
- * current month anytime, the next month in the last 5 days of the current
- * one (see lib/period.ts creatablePeriods).
+ * a month calendar (any past month through December of next year). Months
+ * the org already knows show a data dot / lock icon; picking a month that
+ * doesn't exist yet creates it first (an "open" sign-off row) so it sticks
+ * in the derived period list.
  */
 export default function PeriodSwitcher({ isCollapsed }: { isCollapsed: boolean }) {
   const t = useT();
@@ -78,7 +79,11 @@ export default function PeriodSwitcher({ isCollapsed }: { isCollapsed: boolean }
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ org_id: orgId, period: p }),
       });
-      if (!res.ok) throw new Error(`create period failed: ${res.status}`);
+      // 409 = the month already exists (e.g. created concurrently) — that's
+      // still a month we can select.
+      if (!res.ok && res.status !== 409) {
+        throw new Error(`create period failed: ${res.status}`);
+      }
       await refreshPeriods();
       setPeriod(p);
       setOpen(false);
@@ -87,6 +92,17 @@ export default function PeriodSwitcher({ isCollapsed }: { isCollapsed: boolean }
     } finally {
       setCreating(false);
     }
+  }
+
+  // Calendar pick: an existing month just gets selected; an unknown month is
+  // created first so the derived period list keeps it.
+  function selectMonth(p: string) {
+    if (periods.some((row) => row.period === p)) {
+      setPeriod(p);
+      setOpen(false);
+      return;
+    }
+    void createPeriod(p);
   }
 
   // Lock flags change when admins sign off / reopen — refetch on open so the
@@ -131,10 +147,6 @@ export default function PeriodSwitcher({ isCollapsed }: { isCollapsed: boolean }
   const idx = periods.findIndex((p) => p.period === period);
   const olderPeriod = idx >= 0 ? periods[idx + 1]?.period : undefined;
   const newerPeriod = idx > 0 ? periods[idx - 1]?.period : undefined;
-
-  const existing = new Set(periods.map((p) => p.period));
-  const creatable =
-    periods.length > 0 ? creatablePeriods().filter((p) => !existing.has(p)) : [];
 
   return (
     <div
@@ -186,90 +198,28 @@ export default function PeriodSwitcher({ isCollapsed }: { isCollapsed: boolean }
       )}
 
       {open && !isCollapsed && (
-        <div className="absolute left-2 right-2 top-full z-50 mt-1 max-h-72 overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
+        <div className="absolute left-2 right-2 top-full z-50 mt-1 rounded-xl border border-border bg-card shadow-lg">
           <div className="border-b border-border px-3 py-2 text-xs font-semibold text-zinc-500">
             {t("period.jump_to")}
           </div>
-          {periods.length === 0 ? (
-            <div className="px-3 py-3 text-center text-xs text-zinc-400">
-              {t("common.loading")}
+          <MonthPicker
+            value={period}
+            periods={periods}
+            disabled={creating}
+            onSelect={selectMonth}
+          />
+          {creating && (
+            <div className="px-3 pb-2 text-xs text-zinc-400">
+              {t("period.creating")}
             </div>
-          ) : (
-            <ul>
-              {periods.map((p) => (
-                <li key={p.period}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setPeriod(p.period);
-                      setOpen(false);
-                    }}
-                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-muted ${
-                      p.period === period ? "font-semibold text-accent" : "text-foreground"
-                    } ${p.has_data ? "" : "opacity-50"}`}
-                  >
-                    <PeriodOptionLabel period={p.period} />
-                    {!p.has_data && (
-                      <span className="text-[10px] text-zinc-400">
-                        {t("period.no_data")}
-                      </span>
-                    )}
-                    <span className="ml-auto flex items-center gap-1.5">
-                      {p.locked && <Lock className="h-3 w-3 text-emerald-600" />}
-                      {p.period === period && <Check className="h-3.5 w-3.5" />}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
           )}
-          {creatable.length > 0 && (
-            <div className="border-t border-border">
-              {creatable.map((p) => (
-                <CreatePeriodOption
-                  key={p}
-                  period={p}
-                  disabled={creating}
-                  onCreate={createPeriod}
-                />
-              ))}
-              {createError && (
-                <div className="px-3 pb-2 text-xs text-red-500">
-                  {t("period.create_failed")}
-                </div>
-              )}
+          {createError && (
+            <div className="px-3 pb-2 text-xs text-red-500">
+              {t("period.create_failed")}
             </div>
           )}
         </div>
       )}
     </div>
-  );
-}
-
-function PeriodOptionLabel({ period }: { period: string }) {
-  return <span>{usePeriodLabel(period)}</span>;
-}
-
-function CreatePeriodOption({
-  period,
-  disabled,
-  onCreate,
-}: {
-  period: string;
-  disabled: boolean;
-  onCreate: (p: string) => void;
-}) {
-  const t = useT();
-  const label = usePeriodLabel(period);
-  return (
-    <button
-      type="button"
-      onClick={() => onCreate(period)}
-      disabled={disabled}
-      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-accent transition-colors hover:bg-muted disabled:opacity-50"
-    >
-      <Plus className="h-3.5 w-3.5" />
-      {disabled ? t("period.creating") : t("period.create_month", { month: label })}
-    </button>
   );
 }

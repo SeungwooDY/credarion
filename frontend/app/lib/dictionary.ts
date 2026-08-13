@@ -112,6 +112,13 @@ const en: Record<string, string> = {
   "period.create_month": "Create {month}",
   "period.creating": "Creating…",
   "period.create_failed": "Could not create the month. Please try again.",
+  "ingestion.filing_month": "Filing month",
+  "ingestion.period_mismatch_title": "Month mismatch detected",
+  "ingestion.period_mismatch_body":
+    "{pct}% of this file's rows are dated {detected}, but the batch was filed under {selected}. If that's wrong, re-upload with the correct month selected and \"Replace existing\" checked.",
+  "ingestion.stmt_period_mismatch":
+    "This statement looks like {detected}, but it will be filed under {selected}.",
+  "ingestion.use_detected": "Use {detected}",
 
   // ── team management ──
   "team.title": "Team",
@@ -704,6 +711,12 @@ const zh: Record<string, string> = {
   "period.create_month": "创建{month}",
   "period.creating": "创建中…",
   "period.create_failed": "无法创建该月份，请重试。",
+  "ingestion.filing_month": "入账月份",
+  "ingestion.period_mismatch_title": "检测到月份不一致",
+  "ingestion.period_mismatch_body":
+    "该文件 {pct}% 的行日期属于 {detected}，但本批次已归入 {selected}。如有误，请选择正确月份并勾选“替换已有数据”后重新上传。",
+  "ingestion.stmt_period_mismatch": "该对账单看起来属于 {detected}，但将归入 {selected}。",
+  "ingestion.use_detected": "改用 {detected}",
 
   // ── team management ──
   "team.title": "团队",

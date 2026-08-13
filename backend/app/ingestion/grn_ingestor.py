@@ -64,6 +64,17 @@ class GRNIngestionResult:
     # (supplier_id, "YYYY-MM") pairs touched by newly ingested rows — used by
     # the upload endpoints to auto-rerun reconciliation where a statement exists.
     affected_periods: list[tuple[uuid.UUID, str]] = field(default_factory=list)
+    # Accounting month the batch was filed under (caller-provided or detected).
+    period: str | None = None
+    # Dominant grn_date month across the file's valid rows — the month this
+    # file LOOKS like. Differs from `period` when the user filed the export
+    # under the wrong month.
+    detected_period: str | None = None
+    # Share (0–100) of valid rows dated outside `period`.
+    period_mismatch_pct: int = 0
+    # Set when the file's dates largely disagree with the chosen period —
+    # surfaced by the upload UI so a wrongly-filed batch never fails silently.
+    period_warning: str | None = None
 
 
 def _resolve_grn_columns(df_columns: list[str]) -> dict[str, str]:
@@ -288,6 +299,9 @@ def ingest_grn(
     replaced = 0
     ids_to_purge: list = []
     seen_in_file: set[tuple[str, str, str, str]] = set()
+    # grn_date month histogram over every valid row — INCLUDING duplicates,
+    # so period detection still works on a re-upload where nothing ingests.
+    file_month_counts: dict[str, int] = {}
 
     vend_col = col_map["vend_no"] if "vend_no" in col_map else None
 
@@ -331,6 +345,9 @@ def ingest_grn(
             if not grn_number or grn_date is None:
                 skipped += 1
                 continue
+
+            row_month = f"{grn_date.year:04d}-{grn_date.month:02d}"
+            file_month_counts[row_month] = file_month_counts.get(row_month, 0) + 1
 
             # Dedup check. A key seen earlier in THIS file is always a
             # duplicate. A key already stored in the DB is a duplicate in
@@ -386,17 +403,36 @@ def ingest_grn(
     # Resolve the batch's accounting month: caller-provided, else the
     # dominant grn_date month in the file (keeps overflowed-date stragglers
     # with their batch instead of scattering them across months).
-    resolved_period = period
-    if resolved_period is None and records:
-        month_counts: dict[str, int] = {}
-        for r in records:
-            if r.grn_date is not None:
-                m = f"{r.grn_date.year:04d}-{r.grn_date.month:02d}"
-                month_counts[m] = month_counts.get(m, 0) + 1
-        if month_counts:
-            resolved_period = max(month_counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
+    detected_period = (
+        max(file_month_counts.items(), key=lambda kv: (kv[1], kv[0]))[0]
+        if file_month_counts
+        else None
+    )
+    resolved_period = period if period is not None else detected_period
     for r in records:
         r.period = resolved_period
+
+    result.period = resolved_period
+    result.detected_period = detected_period
+    total_valid = sum(file_month_counts.values())
+    if resolved_period is not None and total_valid > 0:
+        outside = total_valid - file_month_counts.get(resolved_period, 0)
+        result.period_mismatch_pct = round(100 * outside / total_valid)
+    # Warn when the file's dates mostly disagree with the chosen month — the
+    # threshold tolerates normal overflowed-date stragglers but catches an
+    # export filed under the wrong month entirely.
+    if (
+        detected_period is not None
+        and resolved_period is not None
+        and detected_period != resolved_period
+        and result.period_mismatch_pct >= 50
+    ):
+        result.period_warning = (
+            f"{result.period_mismatch_pct}% of this file's rows are dated "
+            f"{detected_period}, but the batch was filed under {resolved_period}. "
+            f"If that's wrong, re-upload with the correct month selected and "
+            f"'replace existing' checked."
+        )
 
     db.add_all(records)
     result.rows_ingested = len(records)

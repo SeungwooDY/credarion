@@ -582,6 +582,97 @@ class TestGRNIngestionE2E:
 
 
 # ============================================================
+# Period detection + mismatch warning
+# ============================================================
+
+
+def _dated_row(grn_no: str, date: str, po: str = "500100") -> dict:
+    return {
+        "供应商编码": "SDD201",
+        "供应商名称": "奥雄电子",
+        "采购订单号": po,
+        "物料编码": "ABC*1234*5*678",
+        "收货数量": "100",
+        "采购单价": "0.50",
+        "金额": "50.00",
+        "币别": "RMB",
+        "收货单号": grn_no,
+        "收货日期": date,
+    }
+
+
+class TestPeriodMismatchDetection:
+    def test_matching_period_no_warning(self, db_session: Session, org: Organization):
+        """Selected month agrees with the file's dates → no warning."""
+        rows = [
+            _dated_row("G1", "2026-03-05"),
+            _dated_row("G2", "2026-03-20"),
+            _dated_row("G3", "2026-02-28"),  # a normal overflowed straggler
+        ]
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w") as f:
+            tmp_path = f.name
+        _make_grn_csv(rows, tmp_path)
+        result = ingest_grn(tmp_path, org.id, db_session, period="2026-03")
+        assert result.status == "success"
+        assert result.period == "2026-03"
+        assert result.detected_period == "2026-03"
+        assert result.period_mismatch_pct == 33
+        assert result.period_warning is None
+
+    def test_wrong_period_warns(self, db_session: Session, org: Organization):
+        """A March file filed under August warns with the detected month."""
+        rows = [_dated_row(f"G{i}", "2026-03-05") for i in range(4)]
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w") as f:
+            tmp_path = f.name
+        _make_grn_csv(rows, tmp_path)
+        result = ingest_grn(tmp_path, org.id, db_session, period="2026-08")
+        assert result.status == "success"
+        assert result.period == "2026-08"
+        assert result.detected_period == "2026-03"
+        assert result.period_mismatch_pct == 100
+        assert result.period_warning is not None
+        assert "2026-03" in result.period_warning
+        assert "2026-08" in result.period_warning
+        # Rows are still stamped with the CHOSEN month — the warning is
+        # advisory, the user decides whether to re-file.
+        record = db_session.query(ERPRecord).filter_by(org_id=org.id).first()
+        assert record.period == "2026-08"
+
+    def test_detection_survives_full_duplicate_reupload(
+        self, db_session: Session, org: Organization
+    ):
+        """Re-uploading an already-ingested file (0 rows ingested) still
+        detects the file's month, so the warning can point at a mis-filed
+        batch even when dedup skips everything."""
+        rows = [_dated_row("G1", "2026-03-05")]
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w") as f:
+            tmp_path = f.name
+        _make_grn_csv(rows, tmp_path)
+        assert ingest_grn(tmp_path, org.id, db_session, period="2026-08").rows_ingested == 1
+
+        dup = ingest_grn(tmp_path, org.id, db_session, period="2026-08")
+        assert dup.rows_ingested == 0
+        assert dup.rows_duplicate == 1
+        assert dup.detected_period == "2026-03"
+        assert dup.period_warning is not None
+
+    def test_no_period_falls_back_to_detected(self, db_session: Session, org: Organization):
+        """Without a caller period the dominant file month is used — and since
+        chosen == detected, there is nothing to warn about."""
+        rows = [
+            _dated_row("G1", "2026-03-05"),
+            _dated_row("G2", "2026-03-06", po="500101"),
+        ]
+        with tempfile.NamedTemporaryFile(suffix=".csv", delete=False, mode="w") as f:
+            tmp_path = f.name
+        _make_grn_csv(rows, tmp_path)
+        result = ingest_grn(tmp_path, org.id, db_session)
+        assert result.period == "2026-03"
+        assert result.detected_period == "2026-03"
+        assert result.period_warning is None
+
+
+# ============================================================
 # Real GRN File (skipped if data not present)
 # ============================================================
 

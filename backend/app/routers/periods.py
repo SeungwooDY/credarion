@@ -3,8 +3,8 @@
 No registry table: the period set is DERIVED from stored data (statement
 uploads, reconciliation runs, sign-offs). New months no longer appear
 automatically — they are created explicitly (stored as an "open" PeriodSignoff
-row), gated by can_create_period: the current month anytime, the next month
-only in the last 5 days of the current one. A brand-new org with no periods
+row), gated by can_create_period: any past or current month, and future
+months through December of next year. A brand-new org with no periods
 at all still gets the current month so the app is usable out of the box.
 Lock state comes from PeriodSignoff. Newest first.
 """
@@ -93,9 +93,9 @@ def create_period(
 ) -> PeriodInfo:
     """Explicitly create an accounting month (stored as an "open" sign-off row).
 
-    Allowed for the current month anytime, and for the next month within the
-    last 5 days of the current one (see can_create_period). 409 if the period
-    already exists, 422 if outside the creation window.
+    Allowed for any past or current month, and future months through December
+    of next year (see can_create_period). 409 if the period already exists,
+    422 if outside the creation window.
     """
     # Body org_id is invisible to the router-level enforce_org_scope.
     authorize_org(db, user, body.org_id)
@@ -130,8 +130,8 @@ def create_period(
         raise HTTPException(
             status_code=422,
             detail=(
-                f"Period {body.period} cannot be created yet — the next month "
-                "opens 5 days before the current month ends"
+                f"Period {body.period} cannot be created — months are only "
+                "creatable through December of next year"
             ),
         )
 

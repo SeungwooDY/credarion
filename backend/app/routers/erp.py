@@ -87,6 +87,12 @@ class GRNIngestionResponse(BaseModel):
     suppliers_created: int = 0
     suppliers_existing: int = 0
     errors: list[str] = []
+    # Period-mismatch detection: the month the batch was filed under, the
+    # month the file's dates look like, and a warning when they disagree.
+    period: str | None = None
+    detected_period: str | None = None
+    period_mismatch_pct: int = 0
+    period_warning: str | None = None
 
 
 class ERPStatusResponse(BaseModel):
@@ -186,6 +192,10 @@ def upload_grn(
         suppliers_created=result.suppliers_created,
         suppliers_existing=result.suppliers_existing,
         errors=result.errors,
+        period=result.period,
+        detected_period=result.detected_period,
+        period_mismatch_pct=result.period_mismatch_pct,
+        period_warning=result.period_warning,
     )
 
     if result.status == "error":
@@ -266,6 +276,10 @@ def upload_grn_stream(
                 "suppliers_created": result.suppliers_created,
                 "suppliers_existing": result.suppliers_existing,
                 "errors": result.errors,
+                "period": result.period,
+                "detected_period": result.detected_period,
+                "period_mismatch_pct": result.period_mismatch_pct,
+                "period_warning": result.period_warning,
             })
         except Exception:
             logger.exception("GRN ingestion failed for org=%s", org_id)

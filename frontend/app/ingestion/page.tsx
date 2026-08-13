@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { CalendarDays } from "lucide-react";
 import PageHeader from "../components/page-header";
 import { useCurrentOrg, useErpStatus } from "../lib/swr";
 import { usePeriod } from "../lib/period";
-import { PeriodBadge } from "../components/period-switcher";
+import { PeriodBadge, usePeriodLabel } from "../components/period-switcher";
+import MonthPicker from "../components/month-picker";
 import { CARD } from "@/app/lib/ui";
 import { FileDropzone, MultiFileDropzone } from "@/components/ui/file-dropzone";
 import { useT } from "@/app/lib/i18n";
@@ -44,6 +46,103 @@ interface BatchResult {
   message: string;
 }
 
+interface PeriodMismatch {
+  pct: number;
+  detected: string;
+  selected: string;
+}
+
+// Compact month control: a labelled chip that toggles an inline calendar.
+// Used by both upload flows so the filing month is always visible + editable.
+function MonthField({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  onChange: (p: string) => void;
+  disabled?: boolean;
+}) {
+  const label = usePeriodLabel(value);
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        disabled={disabled}
+        className="flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-2 text-sm transition-colors hover:bg-muted disabled:opacity-40"
+      >
+        <CalendarDays className="h-3.5 w-3.5 text-muted-foreground" />
+        {label || value || "—"}
+      </button>
+      {open && (
+        <div className="absolute z-40 mt-1 w-64 rounded-xl border border-border bg-card shadow-lg">
+          <MonthPicker
+            value={value}
+            onSelect={(p) => {
+              onChange(p);
+              setOpen(false);
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Inline pre-upload warning: the statement's detected month differs from the
+// chosen filing month; one click adopts the detected month.
+function StatementPeriodWarning({
+  detected,
+  selected,
+  onUseDetected,
+}: {
+  detected: string;
+  selected: string;
+  onUseDetected: () => void;
+}) {
+  const t = useT();
+  const detectedLabel = usePeriodLabel(detected);
+  const selectedLabel = usePeriodLabel(selected);
+  return (
+    <div className="mt-2 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-xs text-amber-800">
+      <span>
+        {t("ingestion.stmt_period_mismatch", {
+          detected: detectedLabel,
+          selected: selectedLabel,
+        })}
+      </span>
+      <button
+        type="button"
+        onClick={onUseDetected}
+        className="shrink-0 rounded-md border border-amber-400 px-2 py-1 font-medium transition-colors hover:bg-amber-100"
+      >
+        {t("ingestion.use_detected", { detected: detectedLabel })}
+      </button>
+    </div>
+  );
+}
+
+// Amber post-ingest banner: the file's dates mostly belong to another month.
+function PeriodMismatchBanner({ mismatch }: { mismatch: PeriodMismatch }) {
+  const t = useT();
+  const detectedLabel = usePeriodLabel(mismatch.detected);
+  const selectedLabel = usePeriodLabel(mismatch.selected);
+  return (
+    <div className="mt-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
+      <p className="mb-1 font-semibold">{t("ingestion.period_mismatch_title")}</p>
+      <p>
+        {t("ingestion.period_mismatch_body", {
+          pct: mismatch.pct,
+          detected: detectedLabel,
+          selected: selectedLabel,
+        })}
+      </p>
+    </div>
+  );
+}
+
 const FIELD_LABEL_KEYS: Record<string, string> = {
   po_number: "ingestion.field_po_number",
   material_number: "ingestion.field_material_number",
@@ -63,7 +162,8 @@ function GRNUploadCard({
 }: {
   orgId: string;
   /** Accounting month the export is uploaded FOR — stamped onto every row;
-      reconciliation scopes pairing by this tag, not by the rows' dates. */
+      reconciliation scopes pairing by this tag, not by the rows' dates.
+      Defaults to the globally selected month; editable per upload. */
   period: string;
   onUploaded?: () => void;
 }) {
@@ -72,6 +172,16 @@ function GRNUploadCard({
   const [grnStatus, setGrnStatus] = useState("");
   const [grnLoading, setGrnLoading] = useState(false);
   const [grnReplace, setGrnReplace] = useState(false);
+  const [grnPeriod, setGrnPeriod] = useState(period);
+  const [mismatch, setMismatch] = useState<PeriodMismatch | null>(null);
+
+  // Follow the global month when it changes (render-time state adjustment —
+  // see react.dev "adjusting state when a prop changes").
+  const [lastGlobalPeriod, setLastGlobalPeriod] = useState(period);
+  if (period !== lastGlobalPeriod) {
+    setLastGlobalPeriod(period);
+    setGrnPeriod(period);
+  }
 
   const dzLabels = {
     click: t("ingestion.dropzone_click"),
@@ -85,10 +195,11 @@ function GRNUploadCard({
     if (!grnFile || !orgId) return;
     setGrnLoading(true);
     setGrnStatus("");
+    setMismatch(null);
     const fd = new FormData();
     fd.append("file", grnFile);
     fd.append("org_id", orgId);
-    if (period) fd.append("period", period);
+    if (grnPeriod) fd.append("period", grnPeriod);
     if (grnReplace) fd.append("replace", "true");
 
     try {
@@ -134,6 +245,13 @@ function GRNUploadCard({
                   replaced: data.rows_replaced,
                 });
               }
+              if (data.period_warning && data.detected_period && data.period) {
+                setMismatch({
+                  pct: data.period_mismatch_pct,
+                  detected: data.detected_period,
+                  selected: data.period,
+                });
+              }
             }
           }
         }
@@ -165,6 +283,13 @@ function GRNUploadCard({
         className="mb-3"
       />
 
+      <label className="block text-xs font-medium mb-1">
+        {t("ingestion.filing_month")}
+      </label>
+      <div className="mb-3">
+        <MonthField value={grnPeriod} onChange={setGrnPeriod} disabled={grnLoading} />
+      </div>
+
       <label className="flex items-center gap-2 mb-3 text-xs text-zinc-600 cursor-pointer select-none">
         <input
           type="checkbox"
@@ -195,6 +320,8 @@ function GRNUploadCard({
           {grnStatus}
         </div>
       )}
+
+      {mismatch && <PeriodMismatchBanner mismatch={mismatch} />}
     </div>
   );
 }
@@ -260,9 +387,10 @@ export default function IngestionPage() {
       }
       const data: PreviewData = await res.json();
       setPreview(data);
-      // Prefer the period detected from the file; fall back to the globally
-      // selected month so the field isn't empty when detection fails.
-      setSelectedPeriod(data.detected_period || globalPeriod || "");
+      // Default to the globally selected month — uploads file under the month
+      // the user is working in. When the file's detected period disagrees, an
+      // inline warning offers a one-click switch to the detected month.
+      setSelectedPeriod(globalPeriod || data.detected_period || "");
       setStmtStep("preview");
       setStmtLoading(false);
     } catch (e) {
@@ -538,13 +666,22 @@ export default function IngestionPage() {
                 <label className="block text-xs font-medium mb-1">
                   {t("common.period")}
                 </label>
-                <input
-                  type="text"
+                <MonthField
                   value={selectedPeriod}
-                  onChange={(e) => setSelectedPeriod(e.target.value)}
-                  placeholder="2026-03"
-                  className="border border-border rounded-lg px-3 py-2 text-sm w-full max-w-[200px] bg-card focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent transition-colors"
+                  onChange={setSelectedPeriod}
+                  disabled={stmtLoading}
                 />
+                {preview.detected_period &&
+                  selectedPeriod &&
+                  preview.detected_period !== selectedPeriod && (
+                    <StatementPeriodWarning
+                      detected={preview.detected_period}
+                      selected={selectedPeriod}
+                      onUseDetected={() =>
+                        setSelectedPeriod(preview.detected_period!)
+                      }
+                    />
+                  )}
               </div>
 
               {preview.preview_rows.length > 0 && (
