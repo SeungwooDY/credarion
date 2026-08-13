@@ -537,8 +537,11 @@ function SupplierCard({
   const hiddenMatchCount = matchedInView.length - cappedMatched.length;
   const displayItems = [...mismatchInView, ...cappedMatched];
 
-  // Only true mismatches are resolvable; matched rows have no actions.
-  const unresolvedItems = filteredItems.filter((i) => i.status !== "resolved" && i.discrepancy_type);
+  // Only true mismatches are resolvable; matched rows have no actions, and
+  // flagged rows go through the flag workflow (unmark before resolving).
+  const unresolvedItems = filteredItems.filter(
+    (i) => i.status !== "resolved" && i.discrepancy_type && !i.marked_discrepancy_reason
+  );
   const resolvedCount = s.items.filter((i) => i.status === "resolved").length;
 
   function toggleSelect(id: string) {
@@ -779,7 +782,7 @@ function SupplierCard({
                       className={`border-t border-border hover:bg-zinc-50 ${rowBg}`}
                     >
                       <td className="text-center px-2 py-2">
-                        {!isResolved && !isMatch && (
+                        {!isResolved && !isMatch && !isMarked && (
                           <input
                             type="checkbox"
                             checked={selected.has(item.id)}
@@ -912,12 +915,16 @@ function SupplierCard({
                                 <span aria-hidden>⚑</span> {t("mismatches.mark_discrepancy")}
                               </button>
                             )}
-                            <button
-                              onClick={() => setResolveItems([item])}
-                              className="px-1.5 py-0.5 text-[11px] text-zinc-400 hover:text-green-700 hover:bg-green-50 rounded-lg transition-colors whitespace-nowrap"
-                            >
-                              {t("common.resolve")}
-                            </button>
+                            {/* Flagged rows are handled through the flag
+                                workflow — no resolve until unmarked. */}
+                            {!item.marked_discrepancy_reason && (
+                              <button
+                                onClick={() => setResolveItems([item])}
+                                className="px-1.5 py-0.5 text-[11px] text-zinc-400 hover:text-green-700 hover:bg-green-50 rounded-lg transition-colors whitespace-nowrap"
+                              >
+                                {t("common.resolve")}
+                              </button>
+                            )}
                           </div>
                         )}
                       </td>
@@ -1136,7 +1143,16 @@ function supplierToRows(supplier: SupplierMismatch): GridRow[] {
     erp_price: item.erp?.po_price ?? item.erp?.unit_price ?? null,
     stmt_price: item.statement?.unit_price ?? null,
     price_delta: item.price_delta,
-    status: item.status,
+    // Resolving never rewrites the exported row — the Status column keeps the
+    // underlying discrepancy state (same mapping unresolve restores) and the
+    // resolution travels only as a note in the Notes column. Resolved state
+    // itself lives in the review table.
+    status:
+      item.status === "resolved"
+        ? item.match_type === "unmatched"
+          ? "unmatched"
+          : "pending_review"
+        : item.status,
     notes: [item.marked_discrepancy_reason, item.resolution_note]
       .filter(Boolean)
       .join(" · "),
