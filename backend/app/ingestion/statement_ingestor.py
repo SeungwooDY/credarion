@@ -182,6 +182,9 @@ async def ingest_supplier_statement(
     result.statement_id = statement.id
 
     # Step 9: Bulk insert StatementLineItem rows
+    def _blank(v: object) -> bool:
+        return v is None or str(v).strip().lower() in ("", "nan", "none")
+
     line_items = []
     row_errors = 0
     for _, row in df.iterrows():
@@ -192,6 +195,13 @@ async def ingest_supplier_statement(
 
             # Skip rows where critical numeric fields are None
             if quantity is None and amount is None:
+                row_errors += 1
+                continue
+
+            # Total/footer rows (合计) carry sums but no identifiers — a real
+            # line always names a PO or a material. Without this they ingest
+            # as giant phantom "not in ERP" claims (SDD201: qty 2,130,601).
+            if _blank(row.get("po_number")) and _blank(row.get("material_number")):
                 row_errors += 1
                 continue
 
