@@ -11,7 +11,7 @@ const GATES = [
 ];
 
 const SOURCES = [
-  { n: "ERP · Goods Receipts", m: "GRN", erp: true },
+  { n: "ERP · Goods Receipts", m: "erp", erp: true },
   { n: "Shenzhen Ruiyang", m: "xlsx" },
   { n: "Acme Components", m: "csv" },
   { n: "Tan Seng Metals", m: "pdf" },

@@ -143,7 +143,7 @@ def _upsert_suppliers(
     name_col = col_map.get("vend_name")
 
     if not vend_col:
-        raise ValueError("GRN file missing supplier identifier column (供应商编码)")
+        raise ValueError("ERP file missing supplier identifier column (供应商编码)")
 
     # Build unique vendor_code → name lookup from the data
     vendor_pairs: dict[str, str] = {}
