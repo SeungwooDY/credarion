@@ -141,9 +141,15 @@ def run_keyed_match(
     A statement line may pair with any ERP receipt whose (PO, material) key
     matches. Date never blocks a pair (date_tolerance_days is retained for
     config compatibility but no longer filters candidates); it only ranks
-    them. Pass A requires an identical unit price; Pass B pairs the
-    remainder as price discrepancies. Candidate preference: matching
-    delivery note, then smallest known date gap, then closest quantity.
+    them. Passes, in order — each exists so a worse pairing can never steal
+    a better pairing's counterpart (XFY201 2026-08-12: a 7,488 claim grabbed
+    the 9,984 receipt that another group matched exactly, turning one real
+    missing-from-ERP into a phantom qty-under plus a phantom missing row):
+      A0: identical price AND quantity within tolerance — the clean pairs.
+      A1: identical price, quantity deviates — qty discrepancies.
+      B:  price differs — price discrepancies.
+    Candidate preference within a pass: matching delivery note, then
+    smallest known date gap, then closest quantity.
 
     Returns (matches, unmatched_erp, unmatched_statement).
     """
@@ -157,8 +163,13 @@ def run_keyed_match(
     matched_erp_ids: set = set()
     paired_stmt_ids: set = set()
 
+    def _qty_clean(e: MatchCandidate, stmt: StatementItem) -> bool:
+        return _within_tolerance(
+            e.quantity or ZERO, stmt.quantity or ZERO, qty_tolerance_pct
+        )
+
     def _candidates(
-        stmt: StatementItem, require_price: bool
+        stmt: StatementItem, require_price: bool, require_qty: bool = False
     ) -> list[tuple[MatchCandidate, int | None]]:
         key = key_fn(stmt.po_number, stmt.material_number)
         if key is None or key not in erp_by_key:
@@ -168,6 +179,8 @@ def run_keyed_match(
             if e.erp_id in matched_erp_ids:
                 continue
             if require_price and not _price_equal(e, stmt):
+                continue
+            if require_qty and not _qty_clean(e, stmt):
                 continue
             out.append((e, _date_gap_days(e, stmt)))
         return out
@@ -188,11 +201,13 @@ def run_keyed_match(
 
         return min(cands, key=sort_key)
 
-    def _run_pass(require_price: bool, pass_name: str) -> None:
+    def _run_pass(
+        require_price: bool, pass_name: str, require_qty: bool = False
+    ) -> None:
         for stmt in statement_items:
             if stmt.line_id in paired_stmt_ids:
                 continue
-            cands = _candidates(stmt, require_price)
+            cands = _candidates(stmt, require_price, require_qty)
             if not cands:
                 continue
             erp, gap = _pick(cands, stmt)
@@ -210,7 +225,10 @@ def run_keyed_match(
                 qty_tolerance_pct, price_tolerance_pct,
             ))
 
-    # Pass A: identical unit price — the clean pairing.
+    # Pass A0: identical price AND clean quantity — exact pairs claim their
+    # counterparts before any qty-deviating line can steal one.
+    _run_pass(require_price=True, pass_name="qty_price_exact", require_qty=True)
+    # Pass A1: identical unit price, quantity deviates — qty discrepancies.
     _run_pass(require_price=True, pass_name="price_exact")
     # Pass B runs only after every line has had a chance at an exact-price
     # pair, so a price-mismatched line can never steal another line's clean
