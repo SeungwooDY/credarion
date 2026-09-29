@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { CalendarDays } from "lucide-react";
+import type { OrgSupplier } from "../lib/swr";
 import PageHeader from "../components/page-header";
-import { useCurrentOrg, useErpStatus } from "../lib/swr";
+import { useCurrentOrg, useErpStatus, useAllSuppliers } from "../lib/swr";
 import { usePeriod } from "../lib/period";
 import { PeriodBadge, usePeriodLabel } from "../components/period-switcher";
 import MonthPicker from "../components/month-picker";
@@ -86,6 +87,87 @@ function MonthField({
             }}
           />
         </div>
+      )}
+    </div>
+  );
+}
+
+// Searchable supplier selector for the statement upload flow. Always editable
+// and pre-seeded with the auto-match so a wrong (or absent) detection can be
+// corrected before filing — the fix for statements binding to the wrong
+// supplier and reconciling to zero.
+function SupplierPicker({
+  suppliers,
+  value,
+  onChange,
+  autoMatched,
+  disabled,
+}: {
+  suppliers: OrgSupplier[];
+  value: string;
+  onChange: (id: string) => void;
+  autoMatched: boolean;
+  disabled?: boolean;
+}) {
+  const t = useT();
+  const [query, setQuery] = useState("");
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const list = q
+      ? suppliers.filter(
+          (s) =>
+            s.name.toLowerCase().includes(q) ||
+            s.vendor_code.toLowerCase().includes(q),
+        )
+      : suppliers;
+    // Keep the currently selected supplier visible even if it's filtered out.
+    if (value && !list.some((s) => s.id === value)) {
+      const sel = suppliers.find((s) => s.id === value);
+      if (sel) return [sel, ...list];
+    }
+    return list;
+  }, [suppliers, query, value]);
+
+  const tone = autoMatched
+    ? "border-blue-200 bg-blue-50"
+    : "border-amber-300 bg-amber-50";
+  const helpTone = autoMatched ? "text-blue-700" : "text-amber-700";
+
+  return (
+    <div className={`rounded-lg border p-3 text-xs space-y-2 ${tone}`}>
+      <label className="block font-semibold text-zinc-800">
+        {t("ingestion.file_under_supplier")}
+      </label>
+      <p className={helpTone}>
+        {autoMatched
+          ? t("ingestion.supplier_auto_matched")
+          : t("ingestion.supplier_pick_manually")}
+      </p>
+      <input
+        type="text"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        disabled={disabled}
+        placeholder={t("ingestion.supplier_search_placeholder")}
+        className="w-full rounded-lg border border-border bg-card px-2 py-1.5 text-sm disabled:opacity-40"
+      />
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
+        size={Math.min(6, Math.max(2, filtered.length + 1))}
+        className="w-full rounded-lg border border-border bg-card px-2 py-1.5 text-sm disabled:opacity-40"
+      >
+        <option value="">{t("ingestion.supplier_none_selected")}</option>
+        {filtered.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.vendor_code} — {s.name}
+          </option>
+        ))}
+      </select>
+      {filtered.length === 0 && (
+        <p className="text-zinc-500">{t("ingestion.supplier_no_results")}</p>
       )}
     </div>
   );
@@ -344,6 +426,11 @@ export default function IngestionPage() {
 
   const [selectedPeriod, setSelectedPeriod] = useState("");
   const [duplicateInfo, setDuplicateInfo] = useState<DuplicateInfo | null>(null);
+  // The supplier this statement will be filed under. Seeded from the preview's
+  // auto-match but always overridable — a wrong silent auto-match was binding
+  // statements to the wrong supplier (and thus reconciling to zero).
+  const [selectedSupplierId, setSelectedSupplierId] = useState("");
+  const { allSuppliers } = useAllSuppliers(orgId);
 
   // Record the outcome for file `idx`, then preview the next file in the
   // queue or show the summary when the batch is exhausted.
@@ -387,6 +474,7 @@ export default function IngestionPage() {
       }
       const data: PreviewData = await res.json();
       setPreview(data);
+      setSelectedSupplierId(data.matched_supplier_id ?? "");
       // Default to the globally selected month — uploads file under the month
       // the user is working in. When the file's detected period disagrees, an
       // inline warning offers a one-click switch to the detected month.
@@ -404,7 +492,7 @@ export default function IngestionPage() {
 
   async function handleConfirmUpload(replace = false) {
     const file = stmtFiles[stmtIdx];
-    const supplierId = preview?.matched_supplier_id;
+    const supplierId = selectedSupplierId;
     if (!file || !supplierId || !selectedPeriod) return;
     setStmtLoading(true);
     setStmtError("");
@@ -415,6 +503,11 @@ export default function IngestionPage() {
     fd.append("supplier_id", supplierId);
     fd.append("period", selectedPeriod);
     if (replace) fd.append("replace", "true");
+    // Send the letterhead name so the backend can learn this name→supplier
+    // mapping when it differs from the chosen supplier's canonical name.
+    if (preview?.detected_supplier_name) {
+      fd.append("detected_supplier_name", preview.detected_supplier_name);
+    }
 
     try {
       const res = await fetch("/api/v1/statements/upload", {
@@ -462,6 +555,7 @@ export default function IngestionPage() {
     setStmtError("");
     setPreview(null);
     setSelectedPeriod("");
+    setSelectedSupplierId("");
     setDuplicateInfo(null);
   }
 
@@ -590,13 +684,15 @@ export default function IngestionPage() {
 
                 <div>
                   <span className="text-blue-600">{t("ingestion.supplier_label")} </span>
-                  {preview.matched_supplier_name ? (
+                  {preview.detected_supplier_name ? (
                     <span className="font-medium text-blue-900">
-                      {preview.matched_supplier_name}
-                    </span>
-                  ) : preview.detected_supplier_name ? (
-                    <span className="text-amber-700">
-                      &quot;{preview.detected_supplier_name}&quot; {t("ingestion.not_found_in_db")}
+                      &quot;{preview.detected_supplier_name}&quot;
+                      {!preview.matched_supplier_id && (
+                        <span className="text-amber-700">
+                          {" "}
+                          {t("ingestion.not_found_in_db")}
+                        </span>
+                      )}
                     </span>
                   ) : (
                     <span className="text-zinc-400">{t("ingestion.could_not_detect")}</span>
@@ -652,16 +748,14 @@ export default function IngestionPage() {
                 </div>
               )}
 
-              {!preview.matched_supplier_id && (
-                <div className="text-xs p-3 border border-red-300 bg-red-50 rounded-lg">
-                  <p className="font-semibold text-red-800">
-                    {t("ingestion.could_not_match_supplier")}
-                  </p>
-                  <p className="text-red-700">
-                    {t("ingestion.could_not_match_supplier_help")}
-                  </p>
-                </div>
-              )}
+              <SupplierPicker
+                suppliers={allSuppliers}
+                value={selectedSupplierId}
+                onChange={setSelectedSupplierId}
+                autoMatched={!!preview.matched_supplier_id}
+                disabled={stmtLoading}
+              />
+
               <div>
                 <label className="block text-xs font-medium mb-1">
                   {t("common.period")}
@@ -778,7 +872,7 @@ export default function IngestionPage() {
                   <button
                     onClick={() => handleConfirmUpload(false)}
                     disabled={
-                      !preview?.matched_supplier_id || !selectedPeriod || stmtLoading
+                      !selectedSupplierId || !selectedPeriod || stmtLoading
                     }
                     className="px-4 py-2 bg-accent hover:bg-accent-dark text-white rounded-lg text-sm disabled:opacity-40 transition-colors"
                   >

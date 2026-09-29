@@ -161,6 +161,30 @@ export function useSuppliers(orgId: string, period: string) {
   };
 }
 
+export interface OrgSupplier {
+  id: string;
+  vendor_code: string;
+  name: string;
+  currency: string | null;
+  is_cross_border: boolean;
+}
+
+// Every supplier in the org (not just those "ready" for reconciliation) — used
+// by the statement upload flow so the user can pick/override the bound supplier.
+export function useAllSuppliers(orgId: string) {
+  const { data, error, isLoading, mutate } = useSWR<OrgSupplier[]>(
+    orgId ? `/orgs/${orgId}/suppliers` : null,
+    fetcher,
+    swrDefaults
+  );
+  return {
+    allSuppliers: data ?? [],
+    allSuppliersLoading: isLoading,
+    allSuppliersError: error,
+    refreshAllSuppliers: () => mutate(),
+  };
+}
+
 // ── Review queue ─────────────────────────────────────────────
 
 export interface ReviewItem {

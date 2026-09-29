@@ -32,6 +32,7 @@ from app.ingestion.column_mapping import try_alias_mapping
 from app.ingestion.header_detection import clean_header_cells, detect_header_row
 from app.ingestion.statement_ingestor import IngestionResult, ingest_supplier_statement
 from app.reconciliation.auto_run import auto_reconcile
+from app.supplier_matching import match_supplier, record_supplier_alias
 from app.models import (
     ERPRecord,
     StatementLineItem,
@@ -146,7 +147,7 @@ def preview_statement(
         # Match supplier to DB
         matched_supplier = None
         if supplier_name:
-            matched_supplier = _match_supplier_name(supplier_name, org_id, db)
+            matched_supplier = match_supplier(supplier_name, org_id, db)
 
         # Get column headers
         raw_headers = [str(v) if pd.notna(v) else "" for v in df_raw.iloc[header_row]]
@@ -228,6 +229,7 @@ async def upload_statement(
     supplier_id: uuid.UUID = Form(...),
     period: str = Form(...),
     replace: bool = Form(False),
+    detected_supplier_name: str | None = Form(None),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> IngestionResponse:
@@ -295,6 +297,16 @@ async def upload_statement(
 
     if result.status == "error":
         raise HTTPException(status_code=400, detail=response.model_dump())
+
+    # Learn the letterhead name → supplier mapping so a differently-worded name
+    # resolves automatically next month. No-ops when it already matches exactly.
+    if result.status == "success" and detected_supplier_name:
+        supplier = db.get(Supplier, supplier_id)
+        if supplier is not None:
+            record_supplier_alias(
+                detected_supplier_name, supplier_id, supplier.org_id, db
+            )
+            db.commit()
 
     # Reconcile automatically once rows are in — the upload response returns
     # immediately and the run happens after it is sent.
@@ -398,7 +410,13 @@ def _extract_supplier_name(df_raw: pd.DataFrame, header_row: int) -> str | None:
     Chinese company names typically end with 有限公司 or 有限责任公司.
     Also looks for patterns like 供货单位：XXX.
     """
-    company_pattern = re.compile(r"[\u4e00-\u9fff]{2,}(?:有限公司|有限责任公司)")
+    # Allow full-/half-width brackets *inside* the name so a bracketed branch
+    # qualifier doesn't truncate it to a generic tail — "沃福（宁波）智能科技有限公司"
+    # must not collapse to "智能科技有限公司". Non-greedy so it stops at the first
+    # company suffix rather than spanning two concatenated names.
+    company_pattern = re.compile(
+        r"[\u4e00-\u9fff][\u4e00-\u9fff（）()]*?(?:有限公司|有限责任公司)"
+    )
     supply_pattern = re.compile(r"供[货貨]单位[：:]?\s*([\u4e00-\u9fff（()）\s]+(?:有限公司|有限责任公司))")
     # Also try the customer's name (购货单位) so we can exclude it
     customer_pattern = re.compile(r"[购購][货貨]单位[：:]?\s*([\u4e00-\u9fff（()）\s]+(?:有限公司|有限责任公司))")
@@ -513,35 +531,3 @@ def _check_po_overlap(
         overlap_pct=round(overlap_pct, 1),
         warning=warning,
     )
-
-
-def _match_supplier_name(name: str, org_id: uuid.UUID, db: Session) -> Supplier | None:
-    """Match extracted supplier name to a supplier in the DB.
-
-    Tries: exact match → best substring match (longest overlap wins).
-    """
-    # Exact match
-    supplier = (
-        db.query(Supplier)
-        .filter(Supplier.org_id == org_id, Supplier.name == name)
-        .first()
-    )
-    if supplier:
-        return supplier
-
-    # Substring match — pick the longest-name match to avoid false positives
-    # from short names matching inside longer ones
-    suppliers = db.query(Supplier).filter(Supplier.org_id == org_id).all()
-    candidates: list[tuple[int, Supplier]] = []
-    for s in suppliers:
-        if name in s.name or s.name in name:
-            # Score by how much of the extracted name overlaps with the DB name
-            overlap = min(len(name), len(s.name))
-            candidates.append((overlap, s))
-
-    if not candidates:
-        return None
-
-    # Return the candidate with the longest overlap (most specific match)
-    candidates.sort(key=lambda x: x[0], reverse=True)
-    return candidates[0][1]

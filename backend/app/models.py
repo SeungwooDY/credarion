@@ -133,6 +133,43 @@ class Supplier(Base):
     organization: Mapped[Organization] = relationship(back_populates="suppliers")
     erp_records: Mapped[list["ERPRecord"]] = relationship(back_populates="supplier")
     statements: Mapped[list["SupplierStatement"]] = relationship(back_populates="supplier")
+    aliases: Mapped[list["SupplierAlias"]] = relationship(
+        back_populates="supplier", cascade="all, delete-orphan"
+    )
+
+
+class SupplierAlias(Base):
+    """Alternate names a supplier is known by (e.g. how it prints its own
+    statement letterhead vs. how the buyer's ERP records it).
+
+    Learned when a user binds a statement to a supplier whose detected name
+    isn't already an exact match, so future uploads resolve automatically.
+    normalized_alias is unique per org so one spelling can't map to two
+    suppliers.
+    """
+
+    __tablename__ = "supplier_aliases"
+    __table_args__ = (
+        UniqueConstraint(
+            "org_id", "normalized_alias", name="uq_supplier_aliases_org_normalized"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_pk()
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False
+    )
+    supplier_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("suppliers.id", ondelete="CASCADE"), nullable=False
+    )
+    # The alias as entered/detected, for display; matching uses normalized_alias.
+    alias_name: Mapped[str] = mapped_column(String, nullable=False)
+    normalized_alias: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    supplier: Mapped[Supplier] = relationship(back_populates="aliases")
 
 
 class ERPRecord(Base):
