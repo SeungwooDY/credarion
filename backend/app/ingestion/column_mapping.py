@@ -38,6 +38,7 @@ ALIAS_MAP: dict[str, list[str]] = {
     "po_number": [
         "订单单号",
         "订单号",
+        "客户订单",
     ],
     "material_number": [
         "物料编码",
@@ -45,16 +46,24 @@ ALIAS_MAP: dict[str, list[str]] = {
         "对应代码",
         "产品名称",
         "产品型号",
+        "客户型号",
         "规格型号",
         "规格型号1",
     ],
     "quantity": [
+        # Delivered-type (preferred) — reconciliation compares actual delivered
+        # qty against ERP received qty, so these always beat ordered-type below
+        # regardless of column order (see _resolve_quantity).
         "实发数量",
+        "交货数量",
         "数量",
         "数量(PCS)",
         "数量(P)",
         "数量（P)",
         "数量(P",
+        # Ordered-type (fallback) — used only when no delivered column exists.
+        "订单数量",
+        "订货数量",
     ],
     "unit_price": [
         "销售单价",
@@ -68,6 +77,7 @@ ALIAS_MAP: dict[str, list[str]] = {
     "amount": [
         "销售金额",
         "金额",
+        "总金额",
         "含税金额",
         "金额合计",
         "金额(R)",
@@ -90,6 +100,11 @@ _REVERSE_ALIAS: dict[str, str] = {}
 for field, aliases in ALIAS_MAP.items():
     for alias in aliases:
         _REVERSE_ALIAS[alias] = field
+
+# Quantity headers that mean "ordered", not "delivered". Reconciliation
+# compares delivered qty against ERP received qty, so a delivered-type column
+# always wins when both are present; these are a fallback only.
+_QUANTITY_ORDERED = {"订单数量", "订货数量"}
 
 
 def _normalize_header(h: str) -> str:
@@ -144,6 +159,8 @@ def try_alias_mapping(
     mapping: dict[str, str] = {}
     # Track all material_number candidates with their column indices
     material_candidates: list[tuple[str, int]] = []
+    # Track quantity candidates with whether they are ordered-type (fallback).
+    quantity_candidates: list[tuple[str, int, bool]] = []
 
     for idx, header in enumerate(headers):
         if not header:
@@ -153,8 +170,20 @@ def try_alias_mapping(
             canonical = _REVERSE_ALIAS[normalized]
             if canonical == "material_number":
                 material_candidates.append((header, idx))
+            elif canonical == "quantity":
+                quantity_candidates.append(
+                    (header, idx, normalized in _QUANTITY_ORDERED)
+                )
             elif canonical not in mapping:
                 mapping[canonical] = header
+
+    # Resolve quantity: a delivered-type column always wins over an ordered-type
+    # one, independent of column order (a statement often lists 订单数量 before
+    # 交货数量, but reconciliation needs the delivered figure).
+    if quantity_candidates:
+        delivered = [c for c in quantity_candidates if not c[2]]
+        chosen = delivered[0] if delivered else quantity_candidates[0]
+        mapping["quantity"] = chosen[0]
 
     # Also check for unmapped columns whose data matches the part number pattern
     if sample_rows:

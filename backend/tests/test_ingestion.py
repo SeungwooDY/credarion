@@ -150,6 +150,43 @@ class TestAliasMappingTier1:
         assert result is not None
         assert "po_number" in result
 
+    def test_aiyuxing_headers_map(self):
+        """艾裕兴 (LXD202) statement headers — regression for the 0%-match
+        investigation (2026-10-01). These headers were absent from ALIAS_MAP,
+        so all three required fields failed Tier-1 and the supplier scored 0%.
+        """
+        headers = [
+            "序号", "送货日期", "送货单号", "客户订单", "客户型号", "生产编号",
+            "订单数量", "单价", "交货数量", "交货面积(㎡)", "总金额", "备品",
+            "订单备注", "合同编号",
+        ]
+        sample_rows = [
+            ["1", "2026-06-29", "DO202605484", "432409-3", "012*2114*7*001",
+             "333F234498A", "3000", "2.02", "19", "0.14", "38.38", "8", "", "x"],
+        ]
+        result = try_alias_mapping(headers, sample_rows)
+        assert result is not None
+        assert result["po_number"] == "客户订单"
+        assert result["amount"] == "总金额"
+        # Delivered qty (交货数量) must win over ordered qty (订单数量).
+        assert result["quantity"] == "交货数量"
+        # Part-number column (客户型号) chosen over internal code (生产编号).
+        assert result["material_number"] == "客户型号"
+
+    def test_delivered_quantity_preferred_regardless_of_order(self):
+        """交货数量 wins even when 订单数量 appears first in the header row."""
+        headers = ["订单号", "订单数量", "交货数量", "金额"]
+        result = try_alias_mapping(headers)
+        assert result is not None
+        assert result["quantity"] == "交货数量"
+
+    def test_ordered_quantity_used_as_fallback(self):
+        """订单数量 maps when it is the only quantity column present."""
+        headers = ["订单号", "订单数量", "金额"]
+        result = try_alias_mapping(headers)
+        assert result is not None
+        assert result["quantity"] == "订单数量"
+
 
 # ============================================================
 # Data Cleaning
