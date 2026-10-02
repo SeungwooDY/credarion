@@ -43,6 +43,7 @@ from app.reconciliation.exact_match import (
 )
 from app.reconciliation.fuzzy_match import run_fuzzy_match
 from app.reconciliation.preaggregate import combine_erp_records, combine_statement_lines
+from app.reconciliation.signature_match import run_signature_suggestions
 
 logger = logging.getLogger(__name__)
 
@@ -683,18 +684,35 @@ async def run_reconciliation(
         for m in l2_matches:
             all_results.append(_match_to_result(m, run.id, supplier_id, period))
 
+        # Suggest-only (quantity, unit price) pairing for divergent suppliers
+        # (e.g. 诚辉泰, whose PO/material never overlap ERP but whose deliveries
+        # share an exact qty + unit price). Deterministic; surfaced as hints on
+        # the unmatched rows below, never counted as matched.
+        signature_suggestions = run_signature_suggestions(unmatched_erp, unmatched_stmt)
+        sig_erp_ids = {s["erp_id"] for s in signature_suggestions}
+        sig_stmt_ids = {s["stmt_line_id"] for s in signature_suggestions}
+        if signature_suggestions:
+            logger.info(
+                "[RECON DEBUG] Signature (qty+price) suggestions: %d pairings surfaced",
+                len(signature_suggestions),
+            )
+
         # AI layer (suggest-only): every leftover stays unmatched; Claude's
         # pairing hints are attached to the unmatched rows below so the
-        # accountant can confirm or reject them. Never counts as matched.
+        # accountant can confirm or reject them. Never counts as matched. It
+        # runs only on rows the deterministic signature pass didn't already
+        # pair, so the two never double-hint the same row.
+        ai_erp = [e for e in unmatched_erp if e.erp_id not in sig_erp_ids]
+        ai_stmt = [s for s in unmatched_stmt if s.line_id not in sig_stmt_ids]
         ai_suggestions: list[dict[str, Any]] = []
-        if config["ai_layer_enabled"] and unmatched_erp and unmatched_stmt:
+        if config["ai_layer_enabled"] and ai_erp and ai_stmt:
             logger.info(
                 "[RECON DEBUG] AI suggestions: sending %d ERP + %d stmt to Claude",
-                len(unmatched_erp), len(unmatched_stmt),
+                len(ai_erp), len(ai_stmt),
             )
             ai_suggestions = await run_ai_suggestions(
-                unmatched_erp,
-                unmatched_stmt,
+                ai_erp,
+                ai_stmt,
                 anthropic_api_key=settings.anthropic_api_key,
                 max_tokens=config["ai_max_tokens_per_run"],
             )
@@ -751,6 +769,37 @@ async def run_reconciliation(
             unmatched_result_by_stmt[stmt.line_id] = result
             all_results.append(result)
 
+        # Attach deterministic (qty+price) pairing hints. Rows stay unmatched;
+        # the hint is informational until a human confirms it.
+        for sug in signature_suggestions:
+            pct = round(sug["confidence"] * 100)
+            erp_result = unmatched_result_by_erp.get(sug["erp_id"])
+            if erp_result is not None:
+                erp_result.match_details = {
+                    **(erp_result.match_details or {}),
+                    "signature_suggestion": {
+                        "statement_line_id": str(sug["stmt_line_id"]),
+                        "confidence": sug["confidence"],
+                        "reason": sug["reason"],
+                    },
+                }
+                erp_result.discrepancy_note = (
+                    f"Possible statement counterpart ({pct}%): {sug['reason']}"
+                )
+            stmt_result = unmatched_result_by_stmt.get(sug["stmt_line_id"])
+            if stmt_result is not None:
+                stmt_result.match_details = {
+                    **(stmt_result.match_details or {}),
+                    "signature_suggestion": {
+                        "erp_record_id": str(sug["erp_id"]),
+                        "confidence": sug["confidence"],
+                        "reason": sug["reason"],
+                    },
+                }
+                stmt_result.discrepancy_note = (
+                    f"Possible ERP counterpart ({pct}%): {sug['reason']}"
+                )
+
         # Attach AI pairing hints to both sides of each suggestion. The rows
         # remain unmatched (and keep counting as missing) — the hint is
         # informational until a human confirms it.
@@ -791,10 +840,11 @@ async def run_reconciliation(
             "  Total results: %d\n"
             "  Unmatched ERP (missing from statement): %d\n"
             "  Unmatched stmt (missing from ERP): %d\n"
-            "  Layer breakdown: L1=%d, L2=%d, AI suggestions=%d",
+            "  Layer breakdown: L1=%d, L2=%d, signature hints=%d, AI suggestions=%d",
             len(all_results),
             len(unmatched_erp), len(unmatched_stmt),
-            len(l1_matches), len(l2_matches), len(ai_suggestions),
+            len(l1_matches), len(l2_matches),
+            len(signature_suggestions), len(ai_suggestions),
         )
         if unmatched_erp:
             sample_erp = [(e.po_number, e.material_number, str(e.quantity)) for e in unmatched_erp[:5]]
