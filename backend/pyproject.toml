@@ -16,6 +16,10 @@ dependencies = [
     "openpyxl>=3.1.5",
     "xlrd>=2.0.1",
     "anthropic>=0.40.0",
+    # Direct runtime import in routers/chat.py and reconciliation/ai_match.py.
+    # Previously resolved only transitively via anthropic, which broke the prod
+    # build when a newer Python/resolver dropped the transitive dep.
+    "httpx>=0.27.0",
 ]
 
 [project.optional-dependencies]

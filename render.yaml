@@ -16,6 +16,11 @@ services:
     # DB-free liveness probe — lets Render detect and restart a wedged instance.
     healthCheckPath: /health
     envVars:
+      # Pin the Python runtime — Render otherwise auto-upgrades to the latest
+      # (it jumped to 3.14, which dropped a transitive dep and broke the build).
+      # Match the 3.13.x the project is developed/tested against.
+      - key: PYTHON_VERSION
+        value: "3.13.4"
       - key: APP_ENV
         value: production
       - key: AUTH_COOKIE_SECURE
