@@ -28,7 +28,11 @@ from app.db import get_db
 from app.invoicing.file_storage import save_upload
 from app.period_lock import ensure_supplier_period_unlocked
 from app.ingestion.cleaning import normalize_po_number
-from app.ingestion.column_mapping import try_alias_mapping
+from app.ingestion.column_mapping import (
+    LLM_HEADER_SCAN_ROWS,
+    llm_detect_and_map,
+    try_alias_mapping,
+)
 from app.ingestion.header_detection import clean_header_cells, detect_header_row
 from app.ingestion.statement_ingestor import IngestionResult, ingest_supplier_statement
 from app.reconciliation.auto_run import auto_reconcile
@@ -109,7 +113,7 @@ class ColumnMappingUpdate(BaseModel):
 
 
 @router.post("/preview", response_model=PreviewResponse)
-def preview_statement(
+async def preview_statement(
     file: UploadFile = File(...),
     org_id: uuid.UUID = Form(...),
     db: Session = Depends(get_db),
@@ -135,8 +139,37 @@ def preview_statement(
             engine = "openpyxl" if suffix == ".xlsx" else "xlrd"
             df_raw = pd.read_excel(tmp_path, header=None, dtype=str, engine=engine)
 
-        # Detect header row
-        header_row = detect_header_row(df_raw)
+        # Detect header row + map columns. Deterministic keyword detection
+        # first; if it can't read the layout (e.g. an English "P.O.NO" header),
+        # fall back to the LLM so the preview isn't blocked before upload.
+        try:
+            header_row = detect_header_row(df_raw)
+        except ValueError:
+            header_row = None
+
+        if header_row is not None:
+            raw_headers = [str(v) if pd.notna(v) else "" for v in df_raw.iloc[header_row]]
+            columns = clean_header_cells(raw_headers)
+            sample_start = header_row + 1
+            sample_end = min(sample_start + 5, len(df_raw))
+            sample_rows = [
+                [str(v) if pd.notna(v) else "" for v in df_raw.iloc[i]]
+                for i in range(sample_start, sample_end)
+            ]
+            column_mapping = try_alias_mapping(columns, sample_rows)
+        else:
+            top_rows = [
+                [str(v) if pd.notna(v) else "" for v in df_raw.iloc[i]]
+                for i in range(min(LLM_HEADER_SCAN_ROWS, len(df_raw)))
+            ]
+            detected = await llm_detect_and_map(top_rows)
+            if detected is None:
+                raise ValueError(
+                    "Could not detect the statement's header row or column layout"
+                )
+            header_row, column_mapping, _conf = detected
+            raw_headers = [str(v) if pd.notna(v) else "" for v in df_raw.iloc[header_row]]
+            columns = clean_header_cells(raw_headers)
 
         # Extract supplier name from rows above header
         supplier_name = _extract_supplier_name(df_raw, header_row)
@@ -148,22 +181,6 @@ def preview_statement(
         matched_supplier = None
         if supplier_name:
             matched_supplier = match_supplier(supplier_name, org_id, db)
-
-        # Get column headers
-        raw_headers = [str(v) if pd.notna(v) else "" for v in df_raw.iloc[header_row]]
-        columns = clean_header_cells(raw_headers)
-
-        # Get sample data rows for material number validation
-        sample_start = header_row + 1
-        sample_end = min(sample_start + 5, len(df_raw))
-        sample_rows = []
-        for i in range(sample_start, sample_end):
-            sample_rows.append(
-                [str(v) if pd.notna(v) else "" for v in df_raw.iloc[i]]
-            )
-
-        # Try column mapping
-        column_mapping = try_alias_mapping(columns, sample_rows)
 
         # Re-read with header for preview rows
         if suffix == ".csv":

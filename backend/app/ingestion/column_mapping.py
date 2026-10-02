@@ -14,9 +14,20 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.ingestion.header_detection import clean_header_cells
 from app.models import SupplierColumnMapping
 
 logger = logging.getLogger(__name__)
+
+# LLM mappings below this confidence are still applied but flagged for human
+# review rather than trusted silently.
+LLM_CONFIDENCE_REVIEW_THRESHOLD = 0.70
+
+# How many leading rows to hand the LLM when it must locate the header row
+# itself (deterministic keyword detection having failed).
+LLM_HEADER_SCAN_ROWS = 15
+
+_LLM_MODEL = "claude-haiku-4-5-20251001"
 
 # Canonical fields we need to extract
 CANONICAL_FIELDS = [
@@ -217,25 +228,102 @@ def try_alias_mapping(
     return None
 
 
-async def try_llm_mapping(
-    headers: list[str], sample_rows: list[list[str]]
-) -> dict[str, str] | None:
-    """Tier 2: Use Claude API to map unfamiliar headers.
+def _anthropic_client():
+    """Build an Anthropic client, or None if unconfigured/unavailable.
 
-    Returns:
-        Dict mapping canonical field name → original column header,
-        or None if LLM fails or required fields can't be mapped.
+    A missing key is logged at ERROR, not silently ignored: without it, any
+    unfamiliar statement format falls through to manual review, which is an
+    operational problem worth surfacing — not normal behaviour.
     """
     if not settings.anthropic_api_key:
-        logger.warning("No ANTHROPIC_API_KEY configured, skipping LLM mapping")
+        logger.error(
+            "No ANTHROPIC_API_KEY configured — cannot auto-map unfamiliar "
+            "statement formats; they will require manual review."
+        )
         return None
-
     try:
         import anthropic
 
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+        return anthropic.Anthropic(api_key=settings.anthropic_api_key)
     except Exception:
         logger.exception("Failed to initialize Anthropic client")
+        return None
+
+
+def _parse_json_response(text: str) -> Any:
+    """Extract a JSON object from a model response (tolerates ``` fences)."""
+    text = text.strip()
+    if "```" in text:
+        text = text.split("```")[1]
+        if text.startswith("json"):
+            text = text[4:]
+        text = text.strip()
+    return json.loads(text)
+
+
+# Shared field guidance for the LLM prompts — kept in sync with ALIAS_MAP so the
+# model and the deterministic path agree on what each canonical field means.
+_MAPPING_FIELDS_DOC = """- po_number: Purchase order number (订单号/订单号码/客户订单/P.O.NO)
+- material_number: Part/material code — usually a coded part number like 013*1696*2*003 (物料编码/料号/客户型号/规格型号), NOT a free-text product name
+- quantity: Quantity actually delivered — prefer a delivered-qty column (交货数量/实发数量) over an ordered-qty column (订单数量)
+- unit_price: Price per unit
+- amount: Total line amount (price × quantity)
+- delivery_date: Date of delivery
+- delivery_note_ref: Delivery note reference number"""
+
+
+def _validate_llm_map(
+    column_map: dict[str, str],
+    headers: list[str],
+    sample_rows: list[list[str]] | None,
+) -> dict[str, str] | None:
+    """Validate an LLM-produced column map against the real headers.
+
+    - Drops entries that aren't canonical fields or whose column isn't an actual
+      header string.
+    - Re-scores the chosen material_number column against the part-number
+      pattern; if the model picked a free-text column over a coded one, swap to
+      the coded column (mirrors the alias path's material validation).
+    - Returns the validated map, or None if required fields are missing.
+    """
+    validated: dict[str, str] = {}
+    for field, col_name in (column_map or {}).items():
+        if (
+            field in CANONICAL_FIELDS
+            and isinstance(col_name, str)
+            and col_name in headers
+        ):
+            validated[field] = col_name
+
+    # Material re-validation: only override when the model's pick looks weak
+    # (not a part number) AND a better, unmapped coded column is available.
+    mat = validated.get("material_number")
+    if sample_rows and mat in headers:
+        if _score_material_column(mat, headers.index(mat), sample_rows) < 0.5:
+            mapped = set(validated.values())
+            for idx, h in enumerate(headers):
+                if not h or h in mapped:
+                    continue
+                if _score_material_column(h, idx, sample_rows) >= 0.5:
+                    validated["material_number"] = h
+                    break
+
+    if REQUIRED_FIELDS.issubset(validated.keys()):
+        return validated
+    logger.warning("LLM mapping missing required fields: %s", validated)
+    return None
+
+
+async def try_llm_mapping(
+    headers: list[str], sample_rows: list[list[str]]
+) -> tuple[dict[str, str], float] | None:
+    """Tier 2: map already-detected headers via Claude.
+
+    Returns (column_map, confidence), or None if unavailable or the mapping
+    fails validation / misses required fields.
+    """
+    client = _anthropic_client()
+    if client is None:
         return None
 
     prompt = f"""You are mapping Chinese column headers from a supplier reconciliation statement
@@ -243,53 +331,88 @@ to canonical field names.
 
 The column headers are: {json.dumps(headers, ensure_ascii=False)}
 
-Here are 2-3 sample data rows:
+Here are sample data rows:
 {json.dumps(sample_rows, ensure_ascii=False)}
 
 Map each header to one of these canonical fields (if applicable):
-- po_number: Purchase order number (订单号)
-- material_number: Part/material code (物料编码/型号)
-- quantity: Quantity delivered
-- unit_price: Price per unit
-- amount: Total amount (price × quantity)
-- delivery_date: Date of delivery
-- delivery_note_ref: Delivery note reference number
+{_MAPPING_FIELDS_DOC}
 
-Return ONLY a JSON object mapping canonical field names to the original column header strings.
-Example: {{"po_number": "订单号", "quantity": "数量", "amount": "金额"}}
-
-Only include fields you are confident about. Do not include fields that don't have a match."""
+Return ONLY a JSON object with "confidence" (0.0-1.0) and "column_map" (canonical
+field -> exact header string):
+{{"confidence": 0.9, "column_map": {{"po_number": "订单号", "quantity": "数量", "amount": "金额"}}}}
+Only include fields you are confident about."""
 
     try:
         response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=500,
+            model=_LLM_MODEL,
+            max_tokens=600,
             messages=[{"role": "user", "content": prompt}],
         )
-        text = response.content[0].text.strip()
-        # Extract JSON from response (may be wrapped in markdown code block)
-        if "```" in text:
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
-            text = text.strip()
-
-        mapping = json.loads(text)
-
-        # Validate that returned column names actually exist in headers
-        validated: dict[str, str] = {}
-        for field, col_name in mapping.items():
-            if field in CANONICAL_FIELDS and col_name in headers:
-                validated[field] = col_name
-
-        if REQUIRED_FIELDS.issubset(validated.keys()):
-            return validated
-
-        logger.warning("LLM mapping missing required fields: %s", validated)
-        return None
-
+        obj = _parse_json_response(response.content[0].text)
+        validated = _validate_llm_map(obj.get("column_map", {}), headers, sample_rows)
+        if validated is None:
+            return None
+        return validated, float(obj.get("confidence", 0.8))
     except Exception:
         logger.exception("LLM column mapping failed")
+        return None
+
+
+async def llm_detect_and_map(
+    top_rows: list[list[str]],
+) -> tuple[int, dict[str, str], float] | None:
+    """Combined LLM header-row detection + column mapping.
+
+    For layouts the deterministic keyword detector can't handle (e.g. an English
+    ``P.O.NO`` header that lacks the 订单 keyword), ``detect_header_row`` raises
+    before mapping is ever attempted — blocking the most general tool behind the
+    most brittle one. This sends the top rows as an indexed grid and asks Claude
+    for BOTH the header row index and the column map in a single call.
+
+    Returns (header_row, column_map, confidence) or None.
+    """
+    client = _anthropic_client()
+    if client is None:
+        return None
+
+    # Clean every cell so the header text the model returns matches what we
+    # compare against downstream (full-width parens, stray newlines, etc.).
+    grid = {
+        i: clean_header_cells([str(v) for v in row])
+        for i, row in enumerate(top_rows)
+    }
+    prompt = f"""You are analyzing a supplier reconciliation statement spreadsheet.
+Below are the first rows as a JSON object of row_index -> cell values:
+{json.dumps(grid, ensure_ascii=False)}
+
+1. Identify the row index holding the COLUMN HEADERS (not the title, company, or
+   address rows above it).
+2. Map those headers to canonical field names:
+{_MAPPING_FIELDS_DOC}
+
+Return ONLY a JSON object:
+{{"header_row": <int>, "confidence": <0.0-1.0>, "column_map": {{"po_number": "<exact header text>", ...}}}}
+column_map values MUST be exact strings from the identified header row."""
+
+    try:
+        response = client.messages.create(
+            model=_LLM_MODEL,
+            max_tokens=700,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        obj = _parse_json_response(response.content[0].text)
+        header_row = int(obj["header_row"])
+        if not (0 <= header_row < len(top_rows)):
+            logger.warning("LLM returned out-of-range header_row %s", header_row)
+            return None
+        headers = grid[header_row]
+        sample = [grid[i] for i in range(header_row + 1, min(header_row + 4, len(top_rows)))]
+        validated = _validate_llm_map(obj.get("column_map", {}), headers, sample)
+        if validated is None:
+            return None
+        return header_row, validated, float(obj.get("confidence", 0.8))
+    except Exception:
+        logger.exception("LLM header detection + mapping failed")
         return None
 
 
@@ -361,11 +484,17 @@ async def resolve_column_mapping(
         upsert_mapping(supplier_id, alias_result, "alias", header_row, db, confidence=1.0)
         return alias_result, "alias", False
 
-    # Tier 2 — LLM
+    # Tier 2 — LLM. Low-confidence results are still applied but flagged for
+    # human review rather than trusted blindly.
     llm_result = await try_llm_mapping(headers, sample_rows)
     if llm_result:
-        upsert_mapping(supplier_id, llm_result, "llm", header_row, db, confidence=0.85)
-        return llm_result, "llm", False
+        column_map, confidence = llm_result
+        needs_review = confidence < LLM_CONFIDENCE_REVIEW_THRESHOLD
+        upsert_mapping(
+            supplier_id, column_map, "llm", header_row, db,
+            confidence=confidence, needs_review=needs_review,
+        )
+        return column_map, "llm", needs_review
 
     # Tier 3 — flag for human review
     # Build a partial mapping with whatever we can get from aliases

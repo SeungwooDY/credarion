@@ -289,6 +289,7 @@ const en: Record<string, string> = {
   "ingestion.batch_summary": "Upload summary",
   "ingestion.status_skipped": "Skipped",
   "ingestion.status_error": "Failed",
+  "ingestion.status_needs_review": "Needs column-mapping review — no rows imported. Open the supplier's column mapping to confirm it, then re-upload.",
   "ingestion.auto_recon_note":
     "Reconciliation is running automatically in the background — results will appear on the Mismatches page shortly.",
   "ingestion.erp_first_hint":
@@ -893,6 +894,7 @@ const zh: Record<string, string> = {
   "ingestion.batch_summary": "上传汇总",
   "ingestion.status_skipped": "已跳过",
   "ingestion.status_error": "失败",
+  "ingestion.status_needs_review": "需要人工确认列映射——未导入任何行。请打开该供应商的列映射确认后重新上传。",
   "ingestion.auto_recon_note":
     "系统正在后台自动对账——结果稍后将显示在差异页面。",
   "ingestion.erp_first_hint":

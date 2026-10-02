@@ -43,7 +43,7 @@ interface DuplicateInfo {
 
 interface BatchResult {
   name: string;
-  status: "uploaded" | "skipped" | "error";
+  status: "uploaded" | "skipped" | "error" | "needs_review";
   message: string;
 }
 
@@ -515,7 +515,16 @@ export default function IngestionPage() {
         body: fd,
       });
       const data = await res.json();
-      if (res.ok) {
+      if (res.ok && data.status === "needs_review") {
+        // The file parsed but its column layout couldn't be auto-mapped — no
+        // rows were imported. Surface this distinctly instead of as a silent
+        // "0 rows uploaded" success.
+        advance(stmtIdx, {
+          name: file.name,
+          status: "needs_review",
+          message: t("ingestion.status_needs_review"),
+        });
+      } else if (res.ok) {
         advance(stmtIdx, {
           name: file.name,
           status: "uploaded",
@@ -915,7 +924,9 @@ export default function IngestionPage() {
                         ? "bg-green-50 text-green-700 border-green-200"
                         : r.status === "skipped"
                           ? "bg-zinc-50 text-zinc-600 border-zinc-200"
-                          : "bg-red-50 text-red-700 border-red-200"
+                          : r.status === "needs_review"
+                            ? "bg-amber-50 text-amber-700 border-amber-200"
+                            : "bg-red-50 text-red-700 border-red-200"
                     }`}
                   >
                     <span className="font-medium">{r.name}</span>
@@ -924,7 +935,9 @@ export default function IngestionPage() {
                       ? r.message
                       : r.status === "skipped"
                         ? t("ingestion.status_skipped")
-                        : `${t("ingestion.status_error")}${r.message ? ` — ${r.message}` : ""}`}
+                        : r.status === "needs_review"
+                          ? r.message
+                          : `${t("ingestion.status_error")}${r.message ? ` — ${r.message}` : ""}`}
                   </li>
                 ))}
               </ul>

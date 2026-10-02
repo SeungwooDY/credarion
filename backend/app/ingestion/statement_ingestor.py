@@ -10,7 +10,14 @@ import pandas as pd
 from sqlalchemy.orm import Session
 
 from app.ingestion.cleaning import clean_dataframe
-from app.ingestion.column_mapping import get_cached_mapping, resolve_column_mapping
+from app.ingestion.column_mapping import (
+    LLM_CONFIDENCE_REVIEW_THRESHOLD,
+    LLM_HEADER_SCAN_ROWS,
+    get_cached_mapping,
+    llm_detect_and_map,
+    resolve_column_mapping,
+    upsert_mapping,
+)
 from app.ingestion.header_detection import clean_header_cells, detect_header_row
 from app.models import StatementLineItem, SupplierStatement
 
@@ -105,30 +112,60 @@ async def ingest_supplier_statement(
         needs_review = False
         logger.info("Using cached %s mapping for supplier %s", mapping_source, supplier_id)
     else:
-        # Step 3: Detect header row
+        # Step 3: Detect header row (deterministic keyword fast path).
         try:
             header_row = detect_header_row(df_raw)
-        except ValueError as e:
-            result.errors.append(str(e))
-            return result
+        except ValueError:
+            header_row = None
 
-        # Step 4: Extract and clean headers
-        raw_headers = [str(v) if pd.notna(v) else "" for v in df_raw.iloc[header_row]]
-        headers = clean_header_cells(raw_headers)
+        if header_row is not None:
+            # Step 4: Extract and clean headers
+            raw_headers = [str(v) if pd.notna(v) else "" for v in df_raw.iloc[header_row]]
+            headers = clean_header_cells(raw_headers)
 
-        # Get sample rows for LLM (2-3 rows after header)
-        sample_start = header_row + 1
-        sample_end = min(sample_start + 3, len(df_raw))
-        sample_rows = []
-        for i in range(sample_start, sample_end):
-            sample_rows.append(
-                [str(v) if pd.notna(v) else "" for v in df_raw.iloc[i]]
+            # Get sample rows for LLM (2-3 rows after header)
+            sample_start = header_row + 1
+            sample_end = min(sample_start + 3, len(df_raw))
+            sample_rows = []
+            for i in range(sample_start, sample_end):
+                sample_rows.append(
+                    [str(v) if pd.notna(v) else "" for v in df_raw.iloc[i]]
+                )
+
+            # Step 5: Resolve column mapping (alias → LLM → manual)
+            column_map, mapping_source, needs_review = await resolve_column_mapping(
+                headers, sample_rows, supplier_id, header_row, db
             )
-
-        # Step 5: Resolve column mapping (3-tier)
-        column_map, mapping_source, needs_review = await resolve_column_mapping(
-            headers, sample_rows, supplier_id, header_row, db
-        )
+        else:
+            # Deterministic detection failed (e.g. an English "P.O.NO" header
+            # that lacks the 订单 keyword). Let the LLM locate the header row AND
+            # map the columns in one call, so the general tool isn't blocked by
+            # the brittle keyword detector.
+            top_rows = [
+                [str(v) if pd.notna(v) else "" for v in df_raw.iloc[i]]
+                for i in range(min(LLM_HEADER_SCAN_ROWS, len(df_raw)))
+            ]
+            detected = await llm_detect_and_map(top_rows)
+            if detected is None:
+                # No API key, or the LLM couldn't resolve the layout — record a
+                # review stub so the UI surfaces a clear "needs mapping" state
+                # instead of silently ingesting zero rows.
+                upsert_mapping(supplier_id, {}, "manual", 0, db, needs_review=True)
+                db.commit()
+                result.status = "needs_review"
+                result.mapping_source = "manual"
+                result.errors.append(
+                    "Could not detect the statement's header row or column "
+                    "layout — needs manual mapping."
+                )
+                return result
+            header_row, column_map, confidence = detected
+            needs_review = confidence < LLM_CONFIDENCE_REVIEW_THRESHOLD
+            upsert_mapping(
+                supplier_id, column_map, "llm", header_row, db,
+                confidence=confidence, needs_review=needs_review,
+            )
+            mapping_source = "llm"
 
     result.mapping_source = mapping_source
 
